@@ -13,6 +13,11 @@ const CAMS = [['Cam 1 (Room 1)', 'Room 1 · H1-518'], ['Cam 2 (Room 2)', 'Room 2
               ['Cam 3 (Room 3)', 'Room 3 · H1-520'], ['Cam 4 (Top board)', 'Top board']];
 const ROLES = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
 const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+// the stream layout is shared as three small sections, so pressing different buttons at the same moment never clashes
+const STAGE_PARTS = { sMain: ['main', 'onBreak'], sCam: ['cam'], sPip: ['pip'] };
+const stageOf = doc => { const st = {}; let any = false;
+  for (const [k, fields] of Object.entries(STAGE_PARTS)) if (doc[k]) { any = true; for (const f of fields) if (f in doc[k]) st[f] = doc[k][f]; }
+  return any ? st : null; };
 const posOf = fen => Chess.fromSetup(parseFen(fen).unwrap()).unwrap();
 const plyOf = fen => { const p = fen.split(' '); return (Number(p[5] || 1) - 1) * 2 + (p[1] === 'b' ? 1 : 0); };
 
@@ -143,7 +148,7 @@ async function view() {
   if (!key) { console.warn('board view: no room key (room.json)'); return; }
   const room = joinRoom(key, { role: 'obs',
     onDoc: d => { if (d.board && d.board !== doc) { try { doc = d.board; tree = buildTree(doc); draw(); } catch (err) { console.error(err); } }
-      if (d.stage && parent !== window) parent.postMessage({ stage: d.stage }, location.origin); },   // stage.html: layout + Break
+      const st = stageOf(d); if (st && parent !== window) parent.postMessage({ stage: st }, location.origin); },   // stage.html: layout + Break
     onMsg: m => { if (m.t === 'eval' && tree && m.fen === tree.cur.fen) { ev = m; draw(); } } });
   addEventListener('message', e => { if (e.origin === location.origin && e.data?.obsAck) room.send({ t: 'obs', ...e.data.obsAck }); });
   window.__view = { get doc() { return doc; }, room };
@@ -252,12 +257,12 @@ async function laptop() {
   }
 
   // ---------- sharing: publish our changes, take the newest document from the room ----------
-  // two sections: 'board' (moves, arrows, flip, engine) and 'stage' (stream layout), each newest-wins on its own
+  // sections: 'board' (moves, arrows, flip, engine) and the three stream-layout parts, each newest-wins on its own
   const timers = {}, seen = {};
   function commit(section = 'board') {
     if (applying || timers[section] || (section === 'board' && mode !== 'analysis')) return;
     timers[section] = setTimeout(() => { timers[section] = null;
-      const body = section === 'board' ? treeToDoc(root, cur, { orientation, label, engineOn }) : { ...stage };
+      const body = section === 'board' ? treeToDoc(root, cur, { orientation, label, engineOn }) : Object.fromEntries(STAGE_PARTS[section].map(f => [f, stage[f]]));
       const d = room ? room.publish(section, body) : { ...local, [section]: body };
       local = d; seen[section] = d[section]; saveLocal(d); }, 60);
   }
@@ -265,7 +270,9 @@ async function laptop() {
   const saveLocal = d => { try { localStorage.setItem('boardDoc2', JSON.stringify(d)); } catch {} };
   function adopt(all) {
     local = all; saveLocal(all);
-    if (all.stage && all.stage !== seen.stage) { seen.stage = all.stage; const { v, by, ...st } = all.stage; stage = { ...stage, ...st }; renderStage(); }
+    let st = false;
+    for (const k of Object.keys(STAGE_PARTS)) if (all[k] && all[k] !== seen[k]) { seen[k] = all[k]; st = true; for (const f of STAGE_PARTS[k]) if (f in all[k]) stage[f] = all[k][f]; }
+    if (st) renderStage();
     if (!all.board || all.board === seen.board) return;
     if (mode === 'edit') { pendingDoc = all; return; } // keep editing undisturbed; applied when the edit ends
     seen.board = all.board;
@@ -379,16 +386,16 @@ async function laptop() {
   function setMain(m) {
     const wasBreak = !!stage.onBreak;
     if (m === 'break') stage.onBreak = true; else { stage.main = m; stage.onBreak = false; }
-    renderStage(); commit('stage');
+    renderStage(); commit('sMain');
     if (wasBreak !== stage.onBreak) {                 // a scene change: the stream laptop confirms it, or the button turns red
       obsAck = null; clearTimeout(ackTimer);
       ackTimer = setTimeout(() => { if (!obsAck) { obsAck = { onBreak: !!stage.onBreak, ok: false }; renderStage(); } }, 5000);
     }
   }
-  const setCam = n => { stage.cam = n; renderStage(); commit('stage'); };
+  const setCam = n => { stage.cam = n; renderStage(); commit('sCam'); };
   document.querySelectorAll('#mainSeg button').forEach(b => b.onclick = () => setMain(b.dataset.main));
   document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.onclick = () => setCam(+b.dataset.cam));
-  $('pipBtn').onclick = () => { stage.pip = !stage.pip; renderStage(); commit('stage'); };
+  $('pipBtn').onclick = () => { stage.pip = !stage.pip; renderStage(); commit('sPip'); };
   addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || mode === 'edit') return;   // holding a key must not flip the stream back and forth
     if (e.key.toLowerCase() === 's') setMain(stage.main === 'board' && !stage.onBreak ? 'feed' : 'board');

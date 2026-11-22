@@ -1,6 +1,6 @@
 // One shared board for both commentator laptops and the stream, through a private VDO.Ninja data room
 // (peer-to-peer, no server or account of ours). Every page holds the whole document, made of sections ('board': moves,
-// arrows, flip…; 'stage': the stream layout). Per section the newest edit wins (a version number that only goes up,
+// arrows, flip…; sMain/sCam/sPip: the stream layout). Per section the newest edit wins (a version number that only goes up,
 // ties broken by page id), so two people changing different things at the same moment never undo each other.
 
 // Room key and camera prefix: from the link (#room=KEY&cams=PREFIX, saved on this laptop after the first visit),
