@@ -149,7 +149,8 @@ async function view() {
   const room = joinRoom(key, { role: 'obs',
     onDoc: d => { if (d.board && d.board !== doc) { try { doc = d.board; tree = buildTree(doc); draw(); } catch (err) { console.error(err); } }
       const st = stageOf(d); if (st && parent !== window) parent.postMessage({ stage: st }, location.origin); },   // stage.html: layout + Break
-    onMsg: m => { if (m.t === 'eval' && tree && m.fen === tree.cur.fen) { ev = m; draw(); } } });
+    onMsg: (m, from) => { if (m.t !== 'eval' || !tree || m.fen !== tree.cur.fen) return;   // two engines: keep the deeper line
+      if (!ev || ev.fen !== m.fen || ev.from === from || (m.e?.depth || 0) >= (ev.e?.depth || 0)) { ev = { ...m, from }; draw(); } } });
   addEventListener('message', e => { if (e.origin === location.origin && e.data?.obsAck) room.send({ t: 'obs', ...e.data.obsAck }); });
   window.__view = { get doc() { return doc; }, room };
 }
@@ -204,7 +205,7 @@ async function laptop() {
 
   // ---------- state ----------
   let nid = 0, root, cur, orientation = 'white', mode = 'analysis', engineOn = true;
-  let label = 'Live board', unsure = [], editTurn = 'w', editBackup = null;
+  let label = 'Live board', unsure = [], editTurn = 'w', editBackup = null, analysedFen = null;
   const nodes = new Map();
   const mk = (fen, extra = {}) => { const n = { id: `${myId}.${++nid}`, fen, children: [], parent: null, shapes: [], ...extra }; nodes.set(n.id, n); return n; };
   function setRoot(fen) { nodes.clear(); root = mk(fen, { ply: plyOf(fen) }); cur = root; }
@@ -228,7 +229,7 @@ async function laptop() {
     cg.setShapes(toCg(cur.shapes, orientation));
     if (cur !== root && unsure.length) { unsure = []; markUnsure(); }
     renderMoveList($('moves'), lineFrom(root), cur.id, id => go(nodes.get(id)));
-    engine.analyse(cur.fen, pos);
+    if (cur.fen !== analysedFen) { analysedFen = cur.fen; engine.analyse(cur.fen, pos); } else showEval();   // arrows only: keep searching
     commit();
   }
   function play(uci) {
@@ -267,7 +268,7 @@ async function laptop() {
       local = d; seen[section] = d[section]; saveLocal(d); }, 60);
   }
   let local = {};
-  const saveLocal = d => { try { localStorage.setItem('boardDoc2', JSON.stringify(d)); } catch {} };
+  const saveLocal = d => { try { localStorage.setItem('boardDoc2', JSON.stringify({ board: d.board, savedAt: Date.now() })); } catch {} };
   function adopt(all) {
     local = all; saveLocal(all);
     let st = false;
@@ -281,7 +282,7 @@ async function laptop() {
     const newRoot = !root || t.root.id !== root.id;
     nodes.clear(); for (const [k, v] of t.nodes) nodes.set(k, v); root = t.root; cur = t.cur;
     orientation = d.orientation || 'white'; label = d.label || label;
-    if (typeof d.engineOn === 'boolean' && d.engineOn !== engineOn) { engineOn = d.engineOn; $('engSw').classList.toggle('on', engineOn); }
+    if (typeof d.engineOn === 'boolean' && d.engineOn !== engineOn) { engineOn = d.engineOn; $('engSw').classList.toggle('on', engineOn); analysedFen = null; if (!engineOn) engine.stop(); }
     if (newRoot && unsure.length) { unsure = []; markUnsure(); $('scanbar').hidden = true; }
     applying = true; try { show(); } finally { applying = false; }
   }
@@ -359,8 +360,8 @@ async function laptop() {
     if (room && engineOn && e && !e.over && !evalTimer) evalTimer = setTimeout(() => { evalTimer = null;   // the stream's eval bar
       const x = engine.last; if (x && mode === 'analysis') room.send({ t: 'eval', fen: cur.fen, e: { depth: x.depth, cp: x.cp, mate: x.mate }, pv: lastPvText }); }, 300);
   }
-  $('engSw').onclick = () => { engineOn = !engineOn; $('engSw').classList.toggle('on', engineOn);
-    if (engineOn && mode === 'analysis') engine.analyse(cur.fen, posOf(cur.fen)); else { engine.stop(); showEval(); } commit(); };
+  $('engSw').onclick = () => { engineOn = !engineOn; $('engSw').classList.toggle('on', engineOn); analysedFen = null;
+    if (engineOn && mode === 'analysis') { analysedFen = cur.fen; engine.analyse(cur.fen, posOf(cur.fen)); } else { engine.stop(); showEval(); } commit(); };
 
   // ---------- what the stream shows (stage.html): board big / camera big / all rooms / break ----------
   let stage = { main: 'grid', cam: 4, pip: true, onBreak: false }, obsAck = null, ackTimer = null, peers = [];
@@ -411,7 +412,7 @@ async function laptop() {
   function enterEdit(placement = cur.fen.split(' ')[0], turn = cur.fen.split(' ')[1], msg = '') {
     document.querySelector('.promo')?.remove();
     if (mode !== 'edit') editBackup = { root, cur, label, nodes: new Map(nodes) };
-    mode = 'edit'; editTurn = turn; engine.stop(); $('scanbar').hidden = true;
+    mode = 'edit'; editTurn = turn; engine.stop(); analysedFen = null; $('scanbar').hidden = true;
     $('turnBtn').textContent = editTurn === 'w' ? 'White to move' : 'Black to move';
     $('scanBox').hidden = true; $('editBox').hidden = false; $('editMsg').textContent = msg; $('editMsg').style.color = msg ? '#ff9b9b' : '';
     cg.set({ fen: placement, lastMove: undefined, check: false, movable: { free: true, color: 'both', dests: undefined, showDests: false },
@@ -566,7 +567,10 @@ async function laptop() {
   // ---------- start: the board saved on this laptop, then whatever newer the room has ----------
   let saved = null; try { saved = JSON.parse(localStorage.getItem('boardDoc2') || 'null'); } catch {}
   setRoot(INITIAL_FEN);
-  if (saved?.board?.rootFen) { if (room) room.seed(saved); else adopt(saved); } else show();
+  // only the board (never the stream layout), only if saved in the last 6 h, and only if nobody in the room answers within 4 s
+  const fresh = saved?.board?.rootFen && Date.now() - (saved.savedAt || 0) < 6 * 3600e3 ? { board: saved.board } : null;
+  show();
+  if (fresh) { if (room) setTimeout(() => { if (!room.doc.board || room.doc.board.by === room.me) room.seed(fresh); }, 4000); else adopt(fresh); }
   renderStage(); renderLink();
   window.__test = { useImage, cg, play, get fen() { return cur.fen; }, get engine() { return engine.last; }, get mode() { return mode; },
     nav: { go, root: () => root }, shiftAll, rotateAll, enterEdit, get shapes() { return cur.shapes; }, get doc() { return room?.doc; }, get stage() { return stage; }, setMain };
