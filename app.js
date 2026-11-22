@@ -242,11 +242,11 @@ async function laptop() {
     $('accBtn').onclick = () => {
       const name = $('accName').value.trim(); if (!name) { msg('Type your name first.'); return $('accName').focus(); }
       try { localStorage.setItem('accName', name); } catch {}
-      req && req.cancel(); $('accBtn').disabled = true; msg('⏳ Waiting for the admin to approve “' + name + '”… keep this page open.');
+      req && req.cancel(); $('accBtn').disabled = true; msg('⏳ Asking…');
       req = requestAccess(name, a => {
         if (a.ok) { try { localStorage.setItem('roomKey', a.key); localStorage.setItem('roomCams', a.cams); } catch {} msg('✅ Approved! Opening…'); setTimeout(() => location.reload(), 600); }
         else { $('accBtn').disabled = false; msg('❌ Not approved. Ask the stream crew, then press Request access again.'); }
-      });
+      }, code => msg(`⏳ Waiting for the admin to approve “${name}”. Your code: ${code} (the admin sees the same code). Keep this page open.`));
     };
     $('accName').onkeydown = e => { if (e.key === 'Enter') $('accBtn').click(); };
     $('accSkip').onclick = () => { req && req.cancel(); $('access').hidden = true; };
