@@ -16,6 +16,55 @@ export async function roomConfig() {
   return { key: key || '', cams: cams || '' };
 }
 
+// ---------- access requests: the public "lobby" ----------
+// A laptop without the key asks for it here with a name; the admin (approve page on the admin's tailnet, or the crew's
+// control page) answers Approve -> the key + camera prefix go to that one laptop only (WebRTC data channel, encrypted).
+// The lobby name is public on purpose: anyone can ask, nobody gets in without a click.
+const LOBBY = 'vgubchess_lobby_v1';
+function lobby(onMsg, onOpen = () => {}) {
+  let vdo = null, my = 0;
+  const start = () => {
+    const g = ++my; try { vdo && vdo.disconnect(); } catch {}
+    vdo = new VDONinjaSDK({ salt: 'vdo.ninja' });
+    vdo.addEventListener('dataReceived', e => { const { data, uuid } = e.detail || {}; if (g === my && data && data.lob === 1) onMsg(data, uuid); });
+    vdo.addEventListener('dataChannelOpen', e => { if (g === my) onOpen((e.detail || {}).uuid); });
+    vdo.addEventListener('reconnectFailed', () => setTimeout(() => g === my && start(), 2000));
+    (async function connect(wait = 3000) { try { await vdo.autoConnect({ room: LOBBY }); } catch { if (g === my) setTimeout(() => g === my && connect(Math.min(wait * 2, 30000)), wait); } })();
+  };
+  start();
+  return { send: (m, to) => { try { vdo.sendData({ lob: 1, ...m }, to || undefined); } catch {} }, restart: start,
+    close: () => { my++; try { vdo.disconnect(); } catch {} } };
+}
+// laptop side: ask until answered. onAnswer({ok, key, cams} | {ok:false})
+export function requestAccess(name, onAnswer) {
+  const rid = Math.random().toString(36).slice(2, 10);
+  let done = false;
+  const l = lobby((m) => {
+    if (done || m.rid !== rid) return;
+    if (m.t === 'grant' && m.key) { done = true; l.close(); clearInterval(t); onAnswer({ ok: true, key: m.key, cams: m.cams || '' }); }
+    else if (m.t === 'deny') { done = true; l.close(); clearInterval(t); onAnswer({ ok: false }); }
+  }, uuid => l.send({ t: 'req', rid, name }, uuid));
+  const t = setInterval(() => l.send({ t: 'req', rid, name }), 4000);   // keep asking (an approver may open later)
+  return { cancel: () => { done = true; clearInterval(t); l.close(); } };
+}
+// admin side: onList([{rid, name, at}]) whenever requests change; answer(rid, grant {key,cams} | null)
+export function approveRequests(onList) {
+  const reqs = new Map();                                    // rid -> { name, uuid, at }
+  const list = () => onList([...reqs].map(([rid, r]) => ({ rid, name: r.name, at: r.at })));
+  const l = lobby((m, uuid) => {
+    if (m.t === 'req' && m.rid) { const had = reqs.has(m.rid); reqs.set(m.rid, { name: String(m.name || '?').slice(0, 40), uuid, at: had ? reqs.get(m.rid).at : Date.now(), seen: Date.now() }); if (!had) list(); }
+    else if (m.t === 'handled' && reqs.delete(m.rid)) list();   // another admin page answered it
+  });
+  setInterval(() => { let ch = false; for (const [k, r] of reqs) if (Date.now() - r.seen > 15000) { reqs.delete(k); ch = true; } if (ch) list(); }, 3000);
+  return {
+    answer(rid, grant) {
+      const r = reqs.get(rid); if (!r) return;
+      l.send(grant ? { t: 'grant', rid, key: grant.key, cams: grant.cams } : { t: 'deny', rid }, r.uuid);
+      l.send({ t: 'handled', rid }); reqs.delete(rid); list();
+    },
+  };
+}
+
 // role: 'laptop' | 'obs'. onDoc(doc) when any section gets newer, onMsg(m, from) for other messages, onPeers([{role}]) every 4 s.
 export function joinRoom(key, { role, onDoc, onMsg = () => {}, onPeers = () => {}, onState = () => {} }) {
   const me = role + '-' + Math.random().toString(36).slice(2, 9);

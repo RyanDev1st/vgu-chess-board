@@ -5,7 +5,7 @@
 // VDO.Ninja data room (sync.js) and show the same document: moves, current move, arrows, flip, stream layout.
 import { Chessground } from './lib/chessground.min.js';
 import { Chess, normalizeMove, parseFen, makeFen, INITIAL_FEN, makeSan, parseUci, chessgroundDests } from './lib/chessops.js';
-import { roomConfig, joinRoom } from './sync.js';
+import { roomConfig, joinRoom, requestAccess } from './sync.js';
 
 const Q = new URLSearchParams(location.search), VIEW = Q.has('view'), STAGE = Q.get('view') === 'stage';
 const LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';   // the stream machine (OBS is here)
@@ -194,6 +194,14 @@ async function laptop() {
         <div id="editMsg" class="hint"></div>
       </div>
     </div></div>
+    <div class="guide" id="access" hidden><div class="gcard">
+      <h2>Join the commentary board</h2>
+      <p>Type your name and press <b>Request access</b>. The stream admin approves you, then the board opens by itself.
+        You only do this once on this laptop.</p>
+      <div class="arow"><input id="accName" maxlength="30" placeholder="Your name"><button class="primary" id="accBtn">Request access</button></div>
+      <div id="accMsg" class="hint"></div>
+      <button id="accSkip" class="small">Use the board without the stream</button>
+    </div></div>
     <div class="guide" id="guide" hidden><div class="gcard">
       <h2>Quick guide</h2>
       <ol>
@@ -216,7 +224,7 @@ async function laptop() {
   $('helpBtn').onclick = () => guide(true); $('guideOk').onclick = () => guide(false);
   $('guide').onclick = e => { if (e.target.id === 'guide') guide(false); };
   addEventListener('keydown', e => { if (e.key === 'Escape' && !$('guide').hidden) guide(false); });
-  try { if (!localStorage.getItem('guideSeen')) guide(true); } catch {}
+  // (the guide opens by itself once this laptop is in the room, see below)
   const status = (t, cls = '') => { $('status').textContent = t; $('status').className = cls; };
 
   // ---------- room (shared with the other laptop and the stream) ----------
@@ -224,6 +232,25 @@ async function laptop() {
   let room = null, applying = false, pendingDoc = null;
   const myId = Math.random().toString(36).slice(2, 7);
   if (key) room = joinRoom(key, { role: 'laptop', onDoc: d => adopt(d), onMsg: (m) => onRoomMsg(m), onPeers: list => renderLink(list) });
+  if (key) { try { if (!localStorage.getItem('guideSeen')) guide(true); } catch {} }
+  else askAccess();
+  // no key on this laptop: ask the stream admin for it (sync.js requestAccess); approved -> saved here, page reloads into the room
+  function askAccess() {
+    let req = null; $('access').hidden = false;
+    try { $('accName').value = localStorage.getItem('accName') || ''; } catch {}
+    const msg = t => $('accMsg').textContent = t;
+    $('accBtn').onclick = () => {
+      const name = $('accName').value.trim(); if (!name) { msg('Type your name first.'); return $('accName').focus(); }
+      try { localStorage.setItem('accName', name); } catch {}
+      req && req.cancel(); $('accBtn').disabled = true; msg('⏳ Waiting for the admin to approve “' + name + '”… keep this page open.');
+      req = requestAccess(name, a => {
+        if (a.ok) { try { localStorage.setItem('roomKey', a.key); localStorage.setItem('roomCams', a.cams); } catch {} msg('✅ Approved! Opening…'); setTimeout(() => location.reload(), 600); }
+        else { $('accBtn').disabled = false; msg('❌ Not approved. Ask the stream crew, then press Request access again.'); }
+      });
+    };
+    $('accName').onkeydown = e => { if (e.key === 'Enter') $('accBtn').click(); };
+    $('accSkip').onclick = () => { req && req.cancel(); $('access').hidden = true; };
+  }
 
   // ---------- state ----------
   let nid = 0, root, cur, orientation = 'white', mode = 'analysis', engineOn = true;
@@ -396,14 +423,21 @@ async function laptop() {
     document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.classList.toggle('on', +b.dataset.cam === stage.cam));
     $('pipBtn').textContent = stage.pip ? 'Small ✓' : 'Small ✗'; $('pipBtn').classList.toggle('on', stage.pip);
   }
+  let obsAt = Date.now();
   function renderLink(list = peers) {
     peers = list;
-    const el = $('link'); if (!room) { el.innerHTML = '⚠ Not linked to the stream. <button id="linkBtn">Paste link…</button>'; el.className = 'link bad';
-      $('linkBtn').onclick = () => { const v = prompt('Paste the board link from the stream laptop (it ends with #room=…):'); const k = v && (v.match(/room=([\w-]+)/) || [])[1], c = v && (v.match(/cams=([\w-]+)/) || [])[1];
-        if (k) { try { localStorage.setItem('roomKey', k); if (c) localStorage.setItem('roomCams', c); } catch {} location.reload(); } }; return; }
+    const el = $('link'); if (!room) { el.innerHTML = '⚠ Not linked to the stream. <button id="linkBtn">Request access</button>'; el.className = 'link bad';
+      $('linkBtn').onclick = () => askAccess(); return; }
     const obs = list.some(p => p.role === 'obs'), mates = list.filter(p => p.role === 'laptop').length;
-    el.textContent = (obs ? '📡 Stream connected' : '📡 Stream not connected (is OBS running?)') + (mates ? ` · 👥 ${mates} other laptop${mates > 1 ? 's' : ''} sharing this board` : '');
+    if (obs) obsAt = Date.now();
+    el.textContent = (obs ? '📡 Stream connected' : '📡 Stream not connected') + (mates ? ` · 👥 ${mates} other laptop${mates > 1 ? 's' : ''} sharing this board` : '');
     el.className = 'link' + (obs ? '' : ' bad');
+    if (!obs && Date.now() - obsAt > 40000) {          // the admin may have changed the key (locked everyone out): ask again
+      const b = document.createElement('button'); b.textContent = 'Request access again'; b.title = 'Only if the stream crew says the board key changed';
+      b.onclick = () => { if (!confirm('Ask the admin for access again? (Only needed if the stream crew changed the key.)')) return;
+        try { localStorage.removeItem('roomKey'); } catch {} location.reload(); };
+      el.append(' ', b);
+    }
   }
   function onRoomMsg(m) { if (m.t === 'obs') { obsAck = { onBreak: !!m.onBreak, ok: !!m.ok }; clearTimeout(ackTimer); renderStage(); } }
   function setMain(m) {
