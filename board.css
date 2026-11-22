@@ -1,0 +1,105 @@
+/* Analysis board. Board colours = the familiar green (light #ebecd0, dark #739552); UI = lichess dark. */
+:root{--bg:#161512;--panel:#262421;--panel2:#302e2c;--ink:#e3e3e3;--mute:#9a9a9a;--line:#3d3a37;--green:#629924;--blue:#3692e7;--red:#cc3333}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.4 "Noto Sans","Segoe UI",sans-serif;overflow:hidden}
+button{font:inherit;color:var(--ink);background:var(--panel2);border:0;border-radius:4px;padding:7px 10px;cursor:pointer}
+button:hover{background:#3d3a37} button.primary{background:var(--green);color:#fff} button.primary:hover{background:#73ad35}
+[hidden]{display:none!important}
+kbd{background:var(--panel2);border-radius:3px;padding:0 4px;font:12px Consolas,monospace}
+
+/* board */
+cg-board{background-color:#ebecd0;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cpath fill='%23739552' d='M1 0h1v1H1zM3 0h1v1H3zM5 0h1v1H5zM7 0h1v1H7zM0 1h1v1H0zM2 1h1v1H2zM4 1h1v1H4zM6 1h1v1H6zM1 2h1v1H1zM3 2h1v1H3zM5 2h1v1H5zM7 2h1v1H7zM0 3h1v1H0zM2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6zM1 4h1v1H1zM3 4h1v1H3zM5 4h1v1H5zM7 4h1v1H7zM0 5h1v1H0zM2 5h1v1H2zM4 5h1v1H4zM6 5h1v1H6zM1 6h1v1H1zM3 6h1v1H3zM5 6h1v1H5zM7 6h1v1H7zM0 7h1v1H0zM2 7h1v1H2zM4 7h1v1H4zM6 7h1v1H6z'/%3E%3C/svg%3E");background-size:cover}
+cg-board square.last-move{background-color:rgba(255,255,51,.45)}
+cg-board square.selected{background-color:rgba(255,255,51,.6)}
+cg-board square.unsure{box-shadow:inset 0 0 0 4px #ff3b3b;background-color:rgba(255,59,59,.25)}
+.orientation-white .ranks :nth-child(odd),.orientation-white .files :nth-child(odd),
+.orientation-black .ranks :nth-child(even),.orientation-black .files :nth-child(even){color:#ebecd0}
+.orientation-white .ranks :nth-child(even),.orientation-white .files :nth-child(even),
+.orientation-black .ranks :nth-child(odd),.orientation-black .files :nth-child(odd){color:#739552}
+.cg-wrap coords{font-weight:700} .cg-wrap coords.files{text-transform:none}
+
+/* eval bar (white share from the bottom, like lichess / chess.com) */
+.evalbar{position:relative;background:#403d39;border-radius:3px;overflow:hidden}
+.evalbar .w{position:absolute;left:0;right:0;bottom:0;height:50%;background:#f4f4f4;transition:height .6s ease}
+.evalbar .mid{position:absolute;left:0;right:0;top:50%;height:2px;background:#d85000aa}
+.evalbar.flip{transform:rotate(180deg)}
+.evalbar.off{visibility:hidden}
+
+/* ---------- laptop page ---------- */
+.stagebox{padding:6px;display:flex;flex-direction:column;gap:5px}
+.seg{display:flex;gap:4px} .seg button{flex:1;padding:7px 4px;font-size:14px}
+.seg button.on{background:var(--green);color:#fff}
+.seg button.fail{background:#c0392b;color:#fff}
+#mainSeg button{font-weight:700;padding:9px 4px}
+#app{display:grid;grid-template-columns:18px auto 410px;justify-content:center;gap:10px;height:100%;padding:12px;box-sizing:border-box}
+#app .evalbar{height:calc(100vh - 24px)}
+#boardBox{height:calc(100vh - 24px);aspect-ratio:1;position:relative}
+#panel{display:flex;flex-direction:column;gap:8px;min-width:0;height:calc(100vh - 24px);margin-left:8px}
+.box{background:var(--panel);border-radius:4px}
+.engine{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.engine .ev{font-size:22px;font-weight:700;min-width:64px}
+.engine .info{color:var(--mute);font-size:12px;flex:1}
+.switch{width:38px;height:20px;border-radius:10px;background:#555;position:relative;cursor:pointer;flex:none}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#ddd;transition:left .15s}
+.switch.on{background:var(--green)} .switch.on::after{left:20px}
+.pv{padding:6px 10px;color:#c8c8c8;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid var(--line);min-height:19px}
+.moves{flex:1;overflow-y:auto;min-height:120px;font-size:15px}
+.mainline{display:grid;grid-template-columns:44px 1fr 1fr}
+.mainline .n{background:var(--panel2);color:var(--mute);text-align:center;padding:4px 0;font-size:13px}
+.mainline .m,.var .m{padding:4px 8px;cursor:pointer;border-radius:3px}
+.mainline .m:hover,.var .m:hover{background:#3a4a2a}
+.m.cur{background:#2f4f1f;color:#fff;font-weight:700}
+.var{grid-column:1/-1;padding:4px 10px 4px 14px;color:#a8a8a8;font-size:13px;line-height:1.9;background:#1f1d1b;border-left:3px solid #4a4744}
+.var .m{padding:2px 3px}
+.var .vn{color:#777;margin-left:3px}
+.empty{color:var(--mute);padding:14px;font-size:13px}
+.nav{display:grid;grid-template-columns:repeat(4,1fr) auto;gap:4px;padding:6px}
+.nav button{font-size:18px;padding:4px}
+.scan{padding:10px;display:flex;flex-direction:column;gap:8px}
+.scan h3,.edit h3{margin:0;font-size:12px;letter-spacing:.08em;color:var(--mute);font-weight:600}
+.cams{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.cams button{padding:6px}
+#photo{display:block;width:100%;border-radius:3px;cursor:crosshair;background:#000}
+.hint{color:var(--mute);font-size:12px}
+.row{display:flex;gap:5px;flex-wrap:wrap}
+#status{font-size:13px;min-height:18px} #status.err{color:#ff7b7b} #status.warn{color:#e3b341}
+.scanbar{background:#3a2f12;color:#f0d68a;border-radius:4px;padding:7px 10px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.scanbar[hidden]{display:none}
+.edit{padding:10px;display:flex;flex-direction:column;gap:8px}
+.spare{display:grid;grid-template-columns:repeat(6,1fr);gap:2px;background:#ebecd0;border-radius:4px;padding:4px}
+#app .spare piece,#app .spare.cg-wrap piece{position:static;display:block;width:100%;height:auto;aspect-ratio:1;background-size:cover;cursor:grab;transform:none}
+.promo{position:absolute;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:5}
+.promo div{display:flex;gap:8px;background:var(--panel);padding:10px;border-radius:6px}
+.promo piece{position:static;display:block;width:90px;height:90px;background-size:cover;cursor:pointer;border-radius:50%;background-color:#b0b0b0}
+.promo piece:hover{background-color:#d59120}
+
+/* ---------- inside stage.html: eval bar + board only, filling the frame ---------- */
+body.stagev{background:transparent;width:100vw;height:100vh}
+body.stagev #view{display:flex;gap:.6vh;height:100vh;width:100vw}
+body.stagev #view .evalbar{position:relative;left:auto;top:auto;width:3.6vh;height:100vh;flex:none;border-radius:0}
+body.stagev #view .board{position:relative;left:auto;top:auto;width:auto;height:100vh;aspect-ratio:1;flex:none}
+body.stagev #view coords{font-size:max(9px,1.9vh)}
+body.stagev #view .cg-wrap coords.files{bottom:1px}
+
+/* ---------- OBS copy, 1920x1080; avatars sit in the bottom corners ---------- */
+body.view{width:1920px;height:1080px}
+#view .evalbar{position:absolute;left:432px;top:50px;width:26px;height:980px}
+#view .board{position:absolute;left:470px;top:50px;width:980px;height:980px}
+#view coords{font-size:18px}
+#view .cg-wrap coords.files{bottom:2px} #view .cg-wrap coords.files coord{padding-left:6px}
+#view .left{position:absolute;left:44px;top:50px;width:360px}
+#view .kicker{font-size:20px;letter-spacing:.22em;color:#8fbf4a;font-weight:700}
+#view .where{font-size:38px;font-weight:700;margin:4px 0 14px;line-height:1.1}
+#view .left img{width:100%;border-radius:6px;display:none}
+#view .right{position:absolute;left:1490px;top:50px;width:390px;max-height:620px;overflow:hidden;display:flex;flex-direction:column;gap:14px}
+#view .turn{font-size:30px;font-weight:700;display:flex;align-items:center;gap:12px}
+#view .dot{width:28px;height:28px;border-radius:50%;border:3px solid #ccc;box-sizing:border-box}
+#view .veng{background:var(--panel);border-radius:6px;padding:12px 16px}
+#view .veng .ev{font-size:44px;font-weight:800;line-height:1}
+#view .veng .pv{border:0;padding:6px 0 0;font-size:20px;white-space:normal;max-height:58px}
+#view .vmoves{background:var(--panel);border-radius:6px;font-size:24px;overflow:hidden}
+#view .vmoves .mainline{grid-template-columns:62px 1fr 1fr}
+#view .vmoves .n{font-size:20px;padding:6px 0}
+#view .vmoves .m{padding:6px 12px;cursor:default}
+#view [hidden]{display:none!important}
+.link{font-size:12.5px;color:#9fd49f;margin-top:6px} .link.bad{color:#ffb4a8} .link button{padding:2px 8px;font-size:12px}
+.row.fix{display:flex;align-items:center;gap:4px;flex-wrap:wrap} .row.fix span{font-size:12.5px;color:#bbb;margin-right:4px} .row.fix button{min-width:34px}

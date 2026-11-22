@@ -1,0 +1,22 @@
+<!doctype html>
+<!--
+  Analysis board for the commentators, built like the lichess analysis board (lichess's own chessground + chessops,
+  Stockfish 19 lite in the browser).
+  Laptops: the GitHub Pages copy, opened with the link from phone-links.html (…/#room=KEY), or http://localhost:8090/board/.
+  Stream:  http://localhost:8090/board/?view=stage inside stage.html (OBS scene "0 · Live"), read-only.
+  All of them share one board through a private VDO.Ninja data room (sync.js).
+  Keys: ← → step through moves, ↑ ↓ start/end, F flip, L engine on/off, E edit position, S board/camera, 1-4 room.
+  In the editor: arrow keys move the whole position one square, R turns it 180°.
+-->
+<html><head><meta charset="utf-8"><title>Analysis board</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="lib/chessground.base.css">
+<link rel="stylesheet" href="lib/chessground.brown.css">
+<link rel="stylesheet" href="lib/chessground.cburnett.css">
+<link rel="stylesheet" href="board.css">
+<script src="coi-serviceworker.min.js"></script><!-- GitHub Pages can't send the headers Stockfish's threads need; this adds them -->
+<script src="lib/vdoninja-sdk.min.js"></script>
+</head>
+<body>
+<script type="module" src="app.js"></script>
+</body></html>
