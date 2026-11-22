@@ -7,7 +7,7 @@ import { Chessground } from './lib/chessground.min.js';
 import { Chess, normalizeMove, parseFen, makeFen, INITIAL_FEN, makeSan, parseUci, chessgroundDests } from './lib/chessops.js';
 import { roomConfig, joinRoom, requestAccess } from './sync.js';
 
-const Q = new URLSearchParams(location.search), VIEW = Q.has('view'), STAGE = Q.get('view') === 'stage';
+const Q = new URLSearchParams(location.search), VIEW = Q.has('view'), STAGE = Q.get('view') === 'stage', DESK = Q.has('desk');   // desk: the tech desk's board tab
 const LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';   // the stream machine (OBS is here)
 const CAMS = [['Cam 1 (Room 1)', 'Room 1 · H1-518'], ['Cam 2 (Room 2)', 'Room 2 · H1-519'],
               ['Cam 3 (Room 3)', 'Room 3 · H1-520'], ['Cam 4 (Top board)', 'Top board']];
@@ -231,8 +231,8 @@ async function laptop() {
   const { key, cams: PH } = await roomConfig();             // PH + c1..c4 = the room cameras' VDO.Ninja stream IDs
   let room = null, applying = false, pendingDoc = null;
   const myId = Math.random().toString(36).slice(2, 7);
-  if (key) room = joinRoom(key, { role: 'laptop', onDoc: d => adopt(d), onMsg: (m) => onRoomMsg(m), onPeers: list => renderLink(list) });
-  if (key) { try { if (!localStorage.getItem('guideSeen')) guide(true); } catch {} }
+  if (key) room = joinRoom(key, { role: DESK ? 'desk' : 'laptop', onDoc: d => adopt(d), onMsg: (m) => onRoomMsg(m), onPeers: list => renderLink(list) });
+  if (key) { try { if (!DESK && !localStorage.getItem('guideSeen')) guide(true); } catch {} }
   else askAccess();
   // no key on this laptop: ask the stream admin for it (sync.js requestAccess); approved -> saved here, page reloads into the room
   function askAccess() {
