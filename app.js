@@ -244,7 +244,7 @@ async function laptop() {
       try { localStorage.setItem('accName', name); } catch {}
       req && req.cancel(); $('accBtn').disabled = true; msg('⏳ Asking…');
       req = requestAccess(name, a => {
-        if (a.ok) { try { localStorage.setItem('roomKey', a.key); localStorage.setItem('roomCams', a.cams); } catch {} msg('✅ Approved! Opening…'); setTimeout(() => location.reload(), 600); }
+        if (a.ok) { try { localStorage.setItem('boardKey', a.key); localStorage.setItem('boardCams', a.cams); } catch {} msg('✅ Approved! Opening…'); setTimeout(() => location.reload(), 600); }
         else { $('accBtn').disabled = false; msg('❌ Not approved. Ask the stream crew, then press Request access again.'); }
       }, code => msg(`⏳ Waiting for the admin to approve “${name}”. Your code: ${code} (the admin sees the same code). Keep this page open.`));
     };
@@ -432,10 +432,11 @@ async function laptop() {
     if (obs) obsAt = Date.now();
     el.textContent = (obs ? '📡 Stream connected' : '📡 Stream not connected') + (mates ? ` · 👥 ${mates} other laptop${mates > 1 ? 's' : ''} sharing this board` : '');
     el.className = 'link' + (obs ? '' : ' bad');
-    if (!obs && Date.now() - obsAt > 40000) {          // the admin may have changed the key (locked everyone out): ask again
-      const b = document.createElement('button'); b.textContent = 'Request access again'; b.title = 'Only if the stream crew says the board key changed';
-      b.onclick = () => { if (!confirm('Ask the admin for access again? (Only needed if the stream crew changed the key.)')) return;
-        try { localStorage.removeItem('roomKey'); } catch {} location.reload(); };
+    if (!obs && Date.now() - obsAt > 15000) {          // wrong/old key (or the stream laptop is off): say so, offer to ask again
+      el.textContent = '⚠ Not connected to the stream: nothing you do is shared. If the stream laptop is on, your access is out of date.';
+      const b = document.createElement('button'); b.textContent = 'Request access again';
+      b.onclick = () => { if (!confirm('Ask the admin for access again?')) return;
+        try { localStorage.removeItem('boardKey'); } catch {} location.reload(); };
       el.append(' ', b);
     }
   }

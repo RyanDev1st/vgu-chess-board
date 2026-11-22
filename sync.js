@@ -5,14 +5,17 @@
 // Robustness: every heartbeat (4 s) carries the versions each page holds, so an update lost in a Wi-Fi blip is re-sent;
 // a page that has heard nobody for 25 s rebuilds its connection (the SDK itself gives up after ~30 s offline).
 
-// Room key and camera prefix: from the link (#room=KEY&cams=PREFIX, saved on this laptop after the first visit),
-// or ../room.json on the stream machine. Neither is in the public code: the prefix would also reveal the face cameras.
+// Room key and camera prefix: given to an approved laptop (saved in its browser), or ../room.json on the stream machine. Neither is in the public code: the prefix would also reveal the face cameras.
 export async function roomConfig() {
+  // Keys in a link (#room=KEY&cams=PREFIX) count only on the stream laptop itself (tests, crew); on the public site a laptop
+  // gets its key only by being approved. Stored under new names: keys saved before approval existed (2026-11-23) are dropped.
+  const local = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const hash = new URLSearchParams(location.hash.slice(1)), get = k => hash.get(k) || new URLSearchParams(location.search).get(k);
-  let key = get('room'), cams = get('cams');
-  if (key) { try { localStorage.setItem('roomKey', key); if (cams) localStorage.setItem('roomCams', cams); } catch {} history.replaceState(null, '', location.pathname + location.search); }
+  let key = local ? get('room') : null, cams = local ? get('cams') : null;
+  try { localStorage.removeItem('roomKey'); localStorage.removeItem('roomCams'); } catch {}
+  if (location.hash.includes('room=')) history.replaceState(null, '', location.pathname + location.search);
   if (!key) { try { const r = await fetch('../room.json', { cache: 'no-store' }); if (r.ok) ({ key, cams } = await r.json()); } catch {} }
-  if (!key) { try { key = localStorage.getItem('roomKey'); cams = cams || localStorage.getItem('roomCams'); } catch {} }
+  if (!key) { try { key = localStorage.getItem('boardKey'); cams = cams || localStorage.getItem('boardCams'); } catch {} }
   return { key: key || '', cams: cams || '' };
 }
 
