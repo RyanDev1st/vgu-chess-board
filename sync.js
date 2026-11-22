@@ -1,6 +1,7 @@
 // One shared board for both commentator laptops and the stream, through a private VDO.Ninja data room
-// (peer-to-peer, no server or account of ours). Every page holds the whole document; the newest edit wins
-// (a version number that only goes up, ties broken by page id), so all pages end up showing the same thing.
+// (peer-to-peer, no server or account of ours). Every page holds the whole document, made of sections ('board': moves,
+// arrows, flip…; 'stage': the stream layout). Per section the newest edit wins (a version number that only goes up,
+// ties broken by page id), so two people changing different things at the same moment never undo each other.
 
 // Room key and camera prefix: from the link (#room=KEY&cams=PREFIX, saved on this laptop after the first visit),
 // or ../room.json on the stream machine. Neither is in the public code: the prefix would also reveal the face cameras.
@@ -13,24 +14,30 @@ export async function roomConfig() {
   return { key: key || '', cams: cams || '' };
 }
 
-// role: 'laptop' | 'obs'. onDoc(doc) when a newer document arrives, onMsg(m) for other messages, onPeers([{role}]) every 4 s.
+// role: 'laptop' | 'obs'. onDoc(doc) when any section gets newer, onMsg(m) for other messages, onPeers([{role}]) every 4 s.
 export function joinRoom(key, { role, onDoc, onMsg = () => {}, onPeers = () => {}, onState = () => {} }) {
   const me = role + '-' + Math.random().toString(36).slice(2, 9);
-  let doc = null, version = 0;
+  let doc = {}, version = 0;
   const peers = new Map();                                  // uuid -> { role, at }
   const vdo = new VDONinjaSDK({ salt: 'vdo.ninja' });
   const send = (m, to) => { try { vdo.sendData({ vgub: 1, role, ...m }, to || undefined); } catch {} };
   const take = d => {
-    if (!d || typeof d.v !== 'number' || !d.by) return;
-    version = Math.max(version, d.v);
-    if (!doc || d.v > doc.v || (d.v === doc.v && d.by > doc.by)) { doc = d; onDoc(d); }
+    if (!d || typeof d !== 'object') return;
+    let changed = false;
+    for (const [k, sec] of Object.entries(d)) {
+      if (!sec || typeof sec.v !== 'number' || !sec.by) continue;
+      version = Math.max(version, sec.v);
+      const old = doc[k];
+      if (!old || sec.v > old.v || (sec.v === old.v && sec.by > old.by)) { doc = { ...doc, [k]: sec }; changed = true; }
+    }
+    if (changed) onDoc(doc);
   };
   vdo.addEventListener('dataReceived', ({ detail }) => {
     const m = detail.data; if (!m || m.vgub !== 1) return;
     peers.set(detail.uuid, { role: m.role, at: Date.now() });
     if (m.t === 'doc') take(m.doc); else if (m.t !== 'hb') onMsg(m, detail.uuid);
   });
-  vdo.addEventListener('dataChannelOpen', ({ detail }) => { send({ t: 'hb' }, detail.uuid); if (doc) send({ t: 'doc', doc }, detail.uuid); });
+  vdo.addEventListener('dataChannelOpen', ({ detail }) => { send({ t: 'hb' }, detail.uuid); if (Object.keys(doc).length) send({ t: 'doc', doc }, detail.uuid); });
   vdo.addEventListener('peerDisconnected', ({ detail }) => { peers.delete(detail.uuid); });
   setInterval(() => {
     send({ t: 'hb' });
@@ -44,7 +51,7 @@ export function joinRoom(key, { role, onDoc, onMsg = () => {}, onPeers = () => {
   return {
     me,
     seed: take,                                             // a document saved on this laptop: used unless the room has a newer one
-    publish(body) { doc = { ...body, v: ++version, by: me }; version = doc.v; send({ t: 'doc', doc }); return doc; },
+    publish(section, body) { doc = { ...doc, [section]: { ...body, v: ++version, by: me } }; send({ t: 'doc', doc }); return doc; },
     send: m => send(m),
     get doc() { return doc; },
   };

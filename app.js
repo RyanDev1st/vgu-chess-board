@@ -142,8 +142,8 @@ async function view() {
   const { key } = await roomConfig();
   if (!key) { console.warn('board view: no room key (room.json)'); return; }
   const room = joinRoom(key, { role: 'obs',
-    onDoc: d => { try { doc = d; tree = buildTree(d); draw(); } catch (err) { console.error(err); }
-      if (parent !== window) parent.postMessage({ stage: d.stage || null }, location.origin); },   // stage.html: layout + Break
+    onDoc: d => { if (d.board && d.board !== doc) { try { doc = d.board; tree = buildTree(doc); draw(); } catch (err) { console.error(err); } }
+      if (d.stage && parent !== window) parent.postMessage({ stage: d.stage }, location.origin); },   // stage.html: layout + Break
     onMsg: m => { if (m.t === 'eval' && tree && m.fen === tree.cur.fen) { ev = m; draw(); } } });
   addEventListener('message', e => { if (e.origin === location.origin && e.data?.obsAck) room.send({ t: 'obs', ...e.data.obsAck }); });
   window.__view = { get doc() { return doc; }, room };
@@ -252,25 +252,31 @@ async function laptop() {
   }
 
   // ---------- sharing: publish our changes, take the newest document from the room ----------
-  let commitTimer = null;
-  function commit() {
-    if (applying || mode !== 'analysis' || commitTimer) return;
-    commitTimer = setTimeout(() => { commitTimer = null;
-      const body = treeToDoc(root, cur, { orientation, label, engineOn, stage });
-      saveLocal(room ? room.publish(body) : body); }, 60);
+  // two sections: 'board' (moves, arrows, flip, engine) and 'stage' (stream layout), each newest-wins on its own
+  const timers = {}, seen = {};
+  function commit(section = 'board') {
+    if (applying || timers[section] || (section === 'board' && mode !== 'analysis')) return;
+    timers[section] = setTimeout(() => { timers[section] = null;
+      const body = section === 'board' ? treeToDoc(root, cur, { orientation, label, engineOn }) : { ...stage };
+      const d = room ? room.publish(section, body) : { ...local, [section]: body };
+      local = d; seen[section] = d[section]; saveLocal(d); }, 60);
   }
-  const saveLocal = d => { try { localStorage.setItem('boardDoc', JSON.stringify(d)); } catch {} };
-  function adopt(d) {
-    if (mode === 'edit') { pendingDoc = d; return; }    // keep editing undisturbed; applied when the edit ends
+  let local = {};
+  const saveLocal = d => { try { localStorage.setItem('boardDoc2', JSON.stringify(d)); } catch {} };
+  function adopt(all) {
+    local = all; saveLocal(all);
+    if (all.stage && all.stage !== seen.stage) { seen.stage = all.stage; const { v, by, ...st } = all.stage; stage = { ...stage, ...st }; renderStage(); }
+    if (!all.board || all.board === seen.board) return;
+    if (mode === 'edit') { pendingDoc = all; return; } // keep editing undisturbed; applied when the edit ends
+    seen.board = all.board;
+    const d = all.board;
     let t; try { t = buildTree(d); } catch (e) { console.error('bad shared board', e); return; }
     const newRoot = !root || t.root.id !== root.id;
     nodes.clear(); for (const [k, v] of t.nodes) nodes.set(k, v); root = t.root; cur = t.cur;
     orientation = d.orientation || 'white'; label = d.label || label;
     if (typeof d.engineOn === 'boolean' && d.engineOn !== engineOn) { engineOn = d.engineOn; $('engSw').classList.toggle('on', engineOn); }
-    if (d.stage) stage = { ...stage, ...d.stage };
     if (newRoot && unsure.length) { unsure = []; markUnsure(); $('scanbar').hidden = true; }
-    applying = true; try { show(); renderStage(); } finally { applying = false; }
-    saveLocal(d);
+    applying = true; try { show(); } finally { applying = false; }
   }
 
   // ---------- navigation ----------
@@ -373,16 +379,16 @@ async function laptop() {
   function setMain(m) {
     const wasBreak = !!stage.onBreak;
     if (m === 'break') stage.onBreak = true; else { stage.main = m; stage.onBreak = false; }
-    renderStage(); commit();
+    renderStage(); commit('stage');
     if (wasBreak !== stage.onBreak) {                 // a scene change: the stream laptop confirms it, or the button turns red
       obsAck = null; clearTimeout(ackTimer);
       ackTimer = setTimeout(() => { if (!obsAck) { obsAck = { onBreak: !!stage.onBreak, ok: false }; renderStage(); } }, 5000);
     }
   }
-  const setCam = n => { stage.cam = n; renderStage(); commit(); };
+  const setCam = n => { stage.cam = n; renderStage(); commit('stage'); };
   document.querySelectorAll('#mainSeg button').forEach(b => b.onclick = () => setMain(b.dataset.main));
   document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.onclick = () => setCam(+b.dataset.cam));
-  $('pipBtn').onclick = () => { stage.pip = !stage.pip; renderStage(); commit(); };
+  $('pipBtn').onclick = () => { stage.pip = !stage.pip; renderStage(); commit('stage'); };
   addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || mode === 'edit') return;   // holding a key must not flip the stream back and forth
     if (e.key.toLowerCase() === 's') setMain(stage.main === 'board' && !stage.onBreak ? 'feed' : 'board');
@@ -436,7 +442,7 @@ async function laptop() {
     if (fen) { setRoot(fen); pendingDoc = null; }      // our new position is the newest edit: it wins over what arrived meanwhile
     else { ({ root, cur, label } = editBackup); nodes.clear(); for (const [k, v] of editBackup.nodes) nodes.set(k, v); }
     show(); renderStage();
-    if (!fen && pendingDoc) { const d = pendingDoc; pendingDoc = null; adopt(d); }   // Cancel: catch up with the other laptop
+    if (!fen && pendingDoc) { const d = pendingDoc; pendingDoc = null; seen.board = null; adopt(d); }   // Cancel: catch up with the other laptop
   }
   $('turnBtn').onclick = () => { editTurn = editTurn === 'w' ? 'b' : 'w'; $('turnBtn').textContent = editTurn === 'w' ? 'White to move' : 'Black to move'; };
   $('clearBtn').onclick = () => { cg.set({ fen: '8/8/8/8/8/8/8/8' }); unsure = []; markUnsure(); };
@@ -455,7 +461,8 @@ async function laptop() {
   reader.onmessage = ({ data }) => { const r = wait.get(data.id); if (r) { wait.delete(data.id); r(data); } };
   const read = bm => new Promise(res => { const id = ++reqId; wait.set(id, res); reader.postMessage({ id, image: bm }, [bm]); });
   const blank = new OffscreenCanvas(64, 64); blank.getContext('2d').fillRect(0, 0, 64, 64);
-  read(blank.transferToImageBitmap()).then(r => status(r.error ? 'Board reader failed: ' + r.error : 'Ready: pick a camera or paste a screenshot.', r.error ? 'err' : ''));
+  read(blank.transferToImageBitmap()).then(r => { if (r.error) status('Board reader failed: ' + r.error, 'err');
+    else if ($('status').textContent.startsWith('Loading')) status('Ready: pick a camera or paste a screenshot.'); });   // don't hide a grab already under way
 
   let frame = null, cropKey = 'paste', drag = null;
   const crops = (() => { try { return JSON.parse(localStorage.getItem('crops') || '{}'); } catch { return {}; } })();
@@ -550,10 +557,10 @@ async function laptop() {
   addEventListener('drop', e => { e.preventDefault(); const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/')); if (f) useImage(f, 'paste', 'Screenshot'); });
 
   // ---------- start: the board saved on this laptop, then whatever newer the room has ----------
-  let saved = null; try { saved = JSON.parse(localStorage.getItem('boardDoc') || 'null'); } catch {}
+  let saved = null; try { saved = JSON.parse(localStorage.getItem('boardDoc2') || 'null'); } catch {}
   setRoot(INITIAL_FEN);
-  if (saved?.rootFen) { if (room && saved.v) room.seed(saved); else adopt(saved); } else show();
+  if (saved?.board?.rootFen) { if (room) room.seed(saved); else adopt(saved); } else show();
   renderStage(); renderLink();
   window.__test = { useImage, cg, play, get fen() { return cur.fen; }, get engine() { return engine.last; }, get mode() { return mode; },
-    nav: { go, root: () => root }, shiftAll, rotateAll, enterEdit, get shapes() { return cur.shapes; }, get doc() { return room?.doc; }, setMain };
+    nav: { go, root: () => root }, shiftAll, rotateAll, enterEdit, get shapes() { return cur.shapes; }, get doc() { return room?.doc; }, get stage() { return stage; }, setMain };
 }
