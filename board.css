@@ -101,5 +101,10 @@ body.view{width:1920px;height:1080px}
 #view .vmoves .n{font-size:20px;padding:6px 0}
 #view .vmoves .m{padding:6px 12px;cursor:default}
 #view [hidden]{display:none!important}
+.linkrow{display:flex;align-items:center;gap:8px;margin-top:6px} .linkrow .link{flex:1;margin-top:0} #helpBtn{padding:3px 10px;font-size:13px}
+.guide{position:fixed;inset:0;z-index:50;background:#000b;display:flex;align-items:center;justify-content:center;padding:16px}
+.gcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px 26px;max-width:640px;max-height:90vh;overflow:auto}
+.gcard h2{margin:0 0 10px;font-size:20px} .gcard ol{margin:0 0 16px;padding-left:22px;line-height:1.55} .gcard li{margin-bottom:9px}
+.gcard button{padding:9px 22px;font-size:16px}
 .link{font-size:12.5px;color:#9fd49f;margin-top:6px} .link.bad{color:#ffb4a8} .link button{padding:2px 8px;font-size:12px}
 .row.fix{display:flex;align-items:center;gap:4px;flex-wrap:wrap} .row.fix span{font-size:12.5px;color:#bbb;margin-right:4px} .row.fix button{min-width:34px}

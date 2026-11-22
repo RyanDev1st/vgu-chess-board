@@ -164,7 +164,7 @@ async function laptop() {
       <div class="box stagebox">
         <div class="seg" id="mainSeg"><button data-main="board" title="S swaps board / camera">♟ Board</button><button data-main="feed">📷 Camera big</button><button data-main="grid">▦ All rooms</button><button data-main="break">☕ Break</button></div>
         <div class="seg" id="camSeg"><button data-cam="1">Room 1</button><button data-cam="2">Room 2</button><button data-cam="3">Room 3</button><button data-cam="4">Top</button><button id="pipBtn" title="the small screen on the left">Small ✓</button></div>
-        <div class="link" id="link">Connecting to the stream…</div>
+        <div class="linkrow"><div class="link" id="link">Connecting to the stream…</div><button id="helpBtn" title="Quick guide">? Guide</button></div>
       </div>
       <div class="box">
         <div class="engine"><div class="switch on" id="engSw" title="Engine on/off (L)"></div><div class="ev" id="ev"></div><div class="info" id="engInfo">Stockfish 19</div></div>
@@ -193,8 +193,30 @@ async function laptop() {
         <div class="row"><button class="primary" id="doneBtn">Done: analyse</button><button id="cancelBtn">Cancel</button></div>
         <div id="editMsg" class="hint"></div>
       </div>
+    </div></div>
+    <div class="guide" id="guide" hidden><div class="gcard">
+      <h2>Quick guide</h2>
+      <ol>
+        <li><b>What viewers see</b>: the buttons at the top. <b>♟ Board</b>, <b>📷 Camera big</b>, <b>▦ All rooms</b>, <b>☕ Break</b>.
+          <b>Room 1 / 2 / 3 / Top</b> picks which room is shown.</li>
+        <li><b>Show a game</b>: under <b>SCAN A BOARD</b>, click the room. The position appears in a few seconds.<br>
+          One square off? <b>Edit position</b> → move everything with <b>◀ ▶ ▲ ▼</b> → <b>Done</b>.</li>
+        <li><b>Explain</b>: drag pieces to play moves (side lines are kept). <kbd>←</kbd> <kbd>→</kbd> step back and forward.</li>
+        <li><b>Draw</b>: right-drag = arrow, right-click a square = circle, click the board = clear.
+          Hold <kbd>Shift</kbd> for red, <kbd>Alt</kbd> for blue.</li>
+        <li><b>Shared</b>: your co-commentator and the stream see all of this straight away.
+          The engine lines stay on your laptop; viewers only see the eval bar.</li>
+        <li>The line under the buttons says <b>📡 Stream not connected</b>? Tell the tech crew.</li>
+      </ol>
+      <button class="primary" id="guideOk">Got it</button>
     </div></div>`;
   const $ = id => document.getElementById(id);
+  // quick guide: opens by itself on a laptop's first visit, then with the "? Guide" button
+  const guide = on => { $('guide').hidden = !on; if (!on) try { localStorage.setItem('guideSeen', '1'); } catch {} };
+  $('helpBtn').onclick = () => guide(true); $('guideOk').onclick = () => guide(false);
+  $('guide').onclick = e => { if (e.target.id === 'guide') guide(false); };
+  addEventListener('keydown', e => { if (e.key === 'Escape' && !$('guide').hidden) guide(false); });
+  try { if (!localStorage.getItem('guideSeen')) guide(true); } catch {}
   const status = (t, cls = '') => { $('status').textContent = t; $('status').className = cls; };
 
   // ---------- room (shared with the other laptop and the stream) ----------
