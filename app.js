@@ -162,8 +162,9 @@ async function laptop() {
     <div id="boardBox"></div>
     <div id="panel">
       <div class="box stagebox">
+        <h3 class="vs">WHAT VIEWERS SEE</h3>
         <div class="seg" id="mainSeg"><button data-main="board" title="S swaps board / camera">♟ Board</button><button data-main="feed">📷 Camera big</button><button data-main="grid">▦ All rooms</button><button data-main="break">☕ Break</button></div>
-        <div class="seg" id="camSeg"><button data-cam="1">Room 1</button><button data-cam="2">Room 2</button><button data-cam="3">Room 3</button><button data-cam="4">Top</button><button id="pipBtn" title="the small screen on the left">Small ✓</button></div>
+        <div class="seg" id="camSeg"><button data-cam="1">Room 1</button><button data-cam="2">Room 2</button><button data-cam="3">Room 3</button><button data-cam="4">Top</button></div>
         <div class="linkrow"><div class="link" id="link">Connecting to the stream…</div><button id="helpBtn" title="Quick guide">? Guide</button></div>
       </div>
       <div class="box">
@@ -175,13 +176,12 @@ async function laptop() {
       <div class="box nav"><button id="first" title="Start (↑)">⏮</button><button id="prev" title="Back (←)">◀</button>
         <button id="next" title="Forward (→)">▶</button><button id="last" title="End (↓)">⏭</button><button id="flip" title="Flip board (F)">⇅ Flip</button></div>
       <div class="box scan" id="scanBox">
-        <h3>SCAN A BOARD</h3>
+        <h3>PUT A ROOM'S GAME ON THIS BOARD</h3>
         <div class="cams" id="cams"></div>
-        <div class="hint">…or paste a screenshot (<kbd>Ctrl</kbd>+<kbd>V</kbd>) / drop an image. Drag a box on the photo to frame just the board (kept per camera).</div>
+        <div class="hint">Or paste a photo here (<kbd>Ctrl</kbd>+<kbd>V</kbd>).</div>
         <canvas id="photo" width="390" height="0"></canvas>
         <div id="status">Loading the board reader…</div>
-        <div class="row"><button id="editBtn" title="E">Edit position</button><button id="startBtn">Start position</button>
-          <button id="copyBtn">Copy FEN</button><button id="lichessBtn">Lichess ↗</button></div>
+        <div class="row"><button id="editBtn" title="E">✏ Fix / set up position</button><button id="startBtn">↺ Start position</button></div>
       </div>
       <div class="box edit" id="editBox" hidden>
         <h3>EDIT POSITION</h3>
@@ -190,31 +190,24 @@ async function laptop() {
           <button data-shift="0,1" title="↑ key">▲</button><button data-shift="0,-1" title="↓ key">▼</button><button id="rotBtn" title="Turn the whole position around (R)">↻ 180°</button></div>
         <div class="hint">Add pieces: drag one onto the board, or click one here and then click squares (click it again to stop). Drag a piece off the board to remove it. Red = the scan wasn&rsquo;t sure.</div>
         <div class="row"><button id="turnBtn">White to move</button><button id="clearBtn">Clear board</button><button id="startEdit">Start position</button></div>
-        <div class="row"><button class="primary" id="doneBtn">Done: analyse</button><button id="cancelBtn">Cancel</button></div>
+        <div class="row"><button class="primary" id="doneBtn">✓ Done</button><button id="cancelBtn">Cancel</button></div>
         <div id="editMsg" class="hint"></div>
       </div>
     </div></div>
     <div class="guide" id="access" hidden><div class="gcard">
       <h2>Join the commentary board</h2>
-      <p>Type your name and press <b>Request access</b>. The stream admin approves you, then the board opens by itself.
-        You only do this once on this laptop.</p>
-      <div class="arow"><input id="accName" maxlength="30" placeholder="Your name"><button class="primary" id="accBtn">Request access</button></div>
+      <p>Type your name and press <b>Ask to join</b>. The crew lets you in, then the board opens by itself. Only once per laptop.</p>
+      <div class="arow"><input id="accName" maxlength="30" placeholder="Your name"><button class="primary" id="accBtn">Ask to join</button></div>
       <div id="accMsg" class="hint"></div>
-      <button id="accSkip" class="small">Use the board without the stream</button>
+      <button id="accSkip" class="small">Just practise (not shown on the stream)</button>
     </div></div>
     <div class="guide" id="guide" hidden><div class="gcard">
-      <h2>Quick guide</h2>
+      <h2>How it works (30 seconds)</h2>
       <ol>
-        <li><b>What viewers see</b>: the buttons at the top. <b>♟ Board</b>, <b>📷 Camera big</b>, <b>▦ All rooms</b>, <b>☕ Break</b>.
-          <b>Room 1 / 2 / 3 / Top</b> picks which room is shown.</li>
-        <li><b>Show a game</b>: under <b>SCAN A BOARD</b>, click the room. The position appears in a few seconds.<br>
-          One square off? <b>Edit position</b> → move everything with <b>◀ ▶ ▲ ▼</b> → <b>Done</b>.</li>
-        <li><b>Explain</b>: drag pieces to play moves (side lines are kept). <kbd>←</kbd> <kbd>→</kbd> step back and forward.</li>
-        <li><b>Draw</b>: right-drag = arrow, right-click a square = circle, click the board = clear.
-          Hold <kbd>Shift</kbd> for red, <kbd>Alt</kbd> for blue.</li>
-        <li><b>Shared</b>: your co-commentator and the stream see all of this straight away.
-          The engine lines stay on your laptop; viewers only see the eval bar.</li>
-        <li>The line under the buttons says <b>📡 Stream not connected</b>? Tell the tech crew.</li>
+        <li><b>The top buttons choose what viewers see</b>: the board, a camera, all rooms, or the break screen.</li>
+        <li><b>To show a game</b>: press its room under <b>PUT A ROOM'S GAME ON THIS BOARD</b>. Wrong square? Press <b>✏ Fix / set up position</b>.</li>
+        <li><b>To explain</b>: drag pieces to play moves. <b>Right-drag</b> draws an arrow. <kbd>←</kbd> <kbd>→</kbd> go back and forward.</li>
+        <li>Everything you do is shown on the stream and on your co-commentator's laptop straight away.</li>
       </ol>
       <button class="primary" id="guideOk">Got it</button>
     </div></div>`;
@@ -245,7 +238,7 @@ async function laptop() {
       req && req.cancel(); $('accBtn').disabled = true; msg('⏳ Asking…');
       req = requestAccess(name, a => {
         if (a.ok) { try { localStorage.setItem('boardKey', a.key); localStorage.setItem('boardCams', a.cams); } catch {} msg('✅ Approved! Opening…'); setTimeout(() => location.reload(), 600); }
-        else { $('accBtn').disabled = false; msg('❌ Not approved. Ask the stream crew, then press Request access again.'); }
+        else { $('accBtn').disabled = false; msg('❌ Not let in. Ask the tech crew, then press Ask to join again.'); }
       }, code => msg(`⏳ Waiting for the admin to approve “${name}”. Your code: ${code} (the admin sees the same code). Keep this page open.`));
     };
     $('accName').onkeydown = e => { if (e.key === 'Enter') $('accBtn').click(); };
@@ -424,21 +417,20 @@ async function laptop() {
       b.classList.toggle('fail', !!failed); b.title = failed ? 'OBS did not switch scene: is OBS open on the stream laptop? Press again.' : '';
     });
     document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.classList.toggle('on', +b.dataset.cam === stage.cam));
-    $('pipBtn').textContent = stage.pip ? 'Small ✓' : 'Small ✗'; $('pipBtn').classList.toggle('on', stage.pip);
   }
   let obsAt = Date.now();
   function renderLink(list = peers) {
     peers = list;
-    const el = $('link'); if (!room) { el.innerHTML = '⚠ Not linked to the stream. <button id="linkBtn">Request access</button>'; el.className = 'link bad';
+    const el = $('link'); if (!room) { el.innerHTML = '⚠ Not on the stream yet. <button id="linkBtn">Ask to join</button>'; el.className = 'link bad';
       $('linkBtn').onclick = () => askAccess(); return; }
     const obs = list.some(p => p.role === 'obs'), mates = list.filter(p => p.role === 'laptop').length;
     if (obs) obsAt = Date.now();
-    el.textContent = (obs ? '📡 Stream connected' : '📡 Stream not connected') + (mates ? ` · 👥 ${mates} other laptop${mates > 1 ? 's' : ''} sharing this board` : '');
+    el.textContent = (obs ? '✓ On the stream' : '⚠ Not on the stream') + (mates ? ` · your co-commentator is here too` : '');
     el.className = 'link' + (obs ? '' : ' bad');
     if (!obs && Date.now() - obsAt > 15000) {          // wrong/old key (or the stream laptop is off): say so, offer to ask again
-      el.textContent = '⚠ Not connected to the stream: nothing you do is shared. If the stream laptop is on, your access is out of date.';
-      const b = document.createElement('button'); b.textContent = 'Request access again';
-      b.onclick = () => { if (!confirm('Ask the admin for access again?')) return;
+      el.textContent = '⚠ Not on the stream: viewers do not see this board.';
+      const b = document.createElement('button'); b.textContent = 'Ask to join again';
+      b.onclick = () => { if (!confirm('Ask the crew to let you in again?')) return;
         try { localStorage.removeItem('boardKey'); } catch {} location.reload(); };
       el.append(' ', b);
     }
@@ -456,7 +448,6 @@ async function laptop() {
   const setCam = n => { stage.cam = n; renderStage(); commit('sCam'); };
   document.querySelectorAll('#mainSeg button').forEach(b => b.onclick = () => setMain(b.dataset.main));
   document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.onclick = () => setCam(+b.dataset.cam));
-  $('pipBtn').onclick = () => { stage.pip = !stage.pip; renderStage(); commit('sPip'); };
   addEventListener('keydown', e => {
     if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || mode === 'edit') return;   // holding a key must not flip the stream back and forth
     if (e.key.toLowerCase() === 's') setMain(stage.main === 'board' && !stage.onBreak ? 'feed' : 'board');
@@ -524,8 +515,6 @@ async function laptop() {
   $('cancelBtn').onclick = () => { unsure = []; markUnsure(); leaveEdit(null); };
   $('editBtn').onclick = () => enterEdit();
   $('startBtn').onclick = () => { label = 'Start position'; unsure = []; markUnsure(); $('scanbar').hidden = true; setRoot(INITIAL_FEN); show(); };
-  $('copyBtn').onclick = async () => { await navigator.clipboard.writeText(cur.fen); status('FEN copied.'); };
-  $('lichessBtn').onclick = () => window.open('https://lichess.org/analysis/standard/' + cur.fen.replace(/ /g, '_'), '_blank');
 
   // ---------- scan a board (reader.worker.mjs) ----------
   const reader = new Worker('./reader.worker.mjs', { type: 'module' });
@@ -534,7 +523,7 @@ async function laptop() {
   const read = bm => new Promise(res => { const id = ++reqId; wait.set(id, res); reader.postMessage({ id, image: bm }, [bm]); });
   const blank = new OffscreenCanvas(64, 64); blank.getContext('2d').fillRect(0, 0, 64, 64);
   read(blank.transferToImageBitmap()).then(r => { if (r.error) status('Board reader failed: ' + r.error, 'err');
-    else if ($('status').textContent.startsWith('Loading')) status('Ready: pick a camera or paste a screenshot.'); });   // don't hide a grab already under way
+    else if ($('status').textContent.startsWith('Loading')) status(''); });   // don't hide a grab already under way
 
   let frame = null, cropKey = 'paste', drag = null;
   const crops = (() => { try { return JSON.parse(localStorage.getItem('crops') || '{}'); } catch { return {}; } })();
@@ -584,7 +573,7 @@ async function laptop() {
     const t = h('button', '', turn === 'w' ? 'White to move ⇄' : 'Black to move ⇄');
     t.onclick = () => { if (mode !== 'analysis') return; const fen = fenFrom(root.fen.split(' ')[0], turn === 'w' ? 'b' : 'w'), why = legal(fen); if (why) return status(why, 'err');
       setRoot(fen); show(); markUnsure(); scanBar(); };
-    const ed = h('button', '', 'Fix / edit'); ed.onclick = () => enterEdit();
+    const ed = h('button', '', '✏ Fix'); ed.onclick = () => enterEdit();
     const x = h('button', '', '✕'); x.onclick = () => { b.hidden = true; };
     b.append(t, ed, x);
   }
