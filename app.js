@@ -14,7 +14,7 @@ const CAMS = [['Cam 1 (Room 1)', 'Room 1 · H1-518'], ['Cam 2 (Room 2)', 'Room 2
 const ROLES = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
 const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 // the stream layout is shared as three small sections, so pressing different buttons at the same moment never clashes
-const STAGE_PARTS = { sMain: ['main', 'onBreak'], sCam: ['cam'], sPip: ['pip'] };
+const STAGE_PARTS = { sMain: ['main', 'onBreak', 'info'], sCam: ['cam'], sPip: ['pip'] };   // info: which big-screen view is on stream
 const stageOf = doc => { const st = {}; let any = false;
   for (const [k, fields] of Object.entries(STAGE_PARTS)) if (doc[k]) { any = true; for (const f of fields) if (f in doc[k]) st[f] = doc[k][f]; }
   return any ? st : null; };

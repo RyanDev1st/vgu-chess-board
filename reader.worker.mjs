@@ -2,20 +2,27 @@
 // Model: ChessQ Lite V6 INT8 (https://huggingface.co/joelseytre/chessq-lite, PolyForm Noncommercial 1.0.0),
 // the same model family lichess's editor "From image" uses; pre/post-processing follows lichess's
 // ui/editor/src/editor.vision.worker.ts. Everything runs on this laptop: no photo leaves it.
-import * as ort from './lib/ort.wasm.min.mjs';
-
+// ?gpu=1: the graphics card (WebGPU build in lib-gpu/); if that fails for any reason, the processor build as before.
 const RES = 644, PLANE = RES * RES, CLASSES = '.PNBRQKpnbrqk';
 const MEAN = [0.485, 0.456, 0.406], STD = [0.229, 0.224, 0.225];
 const WHITE_VIEW_COS = Math.fround(Math.cos(100 * Math.PI / 180));   // White at the bottom within ±100°
-let session;
+const MODEL = new URL('./lib/chessq-lite-v6-int8.onnx', import.meta.url).href;
+let session, ort, backend = 'cpu';
 
-async function load() {
-  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 1) : 1;
+async function start(gpu) {
+  ort = gpu ? await import('./lib-gpu/ort.webgpu.min.mjs') : await import('./lib/ort.wasm.min.mjs');
+  const dir = gpu ? './lib-gpu/ort-wasm-simd-threaded.asyncify' : './lib/ort-wasm-simd-threaded';
+  ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.max(1, Math.min(12, (navigator.hardwareConcurrency || 2) - 2)) : 1;   // 12 threads: 0.8 s a read on the 16-core stream laptop (4 threads: 1.9 s)
   ort.env.wasm.proxy = false;
-  ort.env.wasm.wasmPaths = { wasm: new URL('./lib/ort-wasm-simd-threaded.wasm', import.meta.url).href,
-                             mjs: new URL('./lib/ort-wasm-simd-threaded.mjs', import.meta.url).href };
-  session = await ort.InferenceSession.create(new URL('./lib/chessq-lite-v6-int8.onnx', import.meta.url).href,
-    { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+  ort.env.wasm.wasmPaths = { wasm: new URL(dir + '.wasm', import.meta.url).href, mjs: new URL(dir + '.mjs', import.meta.url).href };
+  session = await ort.InferenceSession.create(MODEL, { executionProviders: [gpu ? 'webgpu' : 'wasm'], graphOptimizationLevel: 'all' });
+  backend = gpu ? 'gpu' : 'cpu';
+}
+async function load() {
+  if (new URL(import.meta.url).searchParams.get('gpu') === '1' && self.navigator.gpu) {
+    try { if (await navigator.gpu.requestAdapter()) return await start(true); } catch (e) { console.warn('reader: graphics card failed, using the processor', e); }
+  }
+  await start(false);
 }
 const ready = load();
 
@@ -44,6 +51,6 @@ self.onmessage = async ({ data: { id, image } }) => {
     const placement = [0, 1, 2, 3, 4, 5, 6, 7].map(r => board.slice(r * 8, r * 8 + 8).join('').replace(/\.+/g, m => m.length)).join('/');
     // squares in FEN order a8..h1 -> names
     const unsure = sure.flatMap((p, s) => p < 0.7 ? ['abcdefgh'[s % 8] + (8 - (s >> 3))] : []);
-    self.postMessage({ id, placement, orientation: cos < WHITE_VIEW_COS ? 'black' : 'white', unsure, ms: Math.round(performance.now() - t0) });
+    self.postMessage({ id, placement, orientation: cos < WHITE_VIEW_COS ? 'black' : 'white', unsure, backend, ms: Math.round(performance.now() - t0) });
   } catch (e) { self.postMessage({ id, error: e.message || String(e) }); }
 };
