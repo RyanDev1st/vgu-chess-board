@@ -159,11 +159,19 @@ export function joinRoom(key, { role, onDoc, onMsg = () => {}, onPeers = () => {
     })();
   }
   start();
+  // Wi-Fi back (or the laptop woke up): rebuild at once instead of waiting for the silence timer (a 30 s drop used to
+  // take ~24 s to catch up after the network returned, 2026-11-23 test)
+  let hadPeers = 0;
+  addEventListener('online', () => setTimeout(start, 500));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - heardAt > 10000) start(); });
   setInterval(() => {
     send({ t: 'hb', vs: summary() });
     const now = Date.now(); for (const [k, p] of peers) if (now - p.at > 15000) peers.delete(k);
+    if (peers.size) hadPeers = now;
     onPeers([...peers.values()]);
-    if (now - Math.max(heardAt, startedAt) > 25000) start();   // heard nobody for 25 s: rebuild the connection
+    // others send a heartbeat every 4 s: 12 s of silence after hearing someone = this connection is broken; alone = 25 s
+    const quiet = now - Math.max(heardAt, startedAt);
+    if (quiet > (now - hadPeers < 60000 ? 12000 : 25000)) start();
   }, 4000);
   return {
     me,
