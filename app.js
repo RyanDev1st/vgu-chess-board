@@ -471,7 +471,7 @@ async function laptop() {
     if (mode !== 'edit') editBackup = { root, cur, label, nodes: new Map(nodes) };
     mode = 'edit'; editTurn = turn; engine.stop(); analysedFen = null; $('scanbar').hidden = true;
     $('turnBtn').textContent = editTurn === 'w' ? 'White to move' : 'Black to move';
-    $('scanBox').hidden = true; $('editBox').hidden = false; $('editMsg').textContent = msg; $('editMsg').style.color = msg ? '#ff9b9b' : '';
+    $('scanBox').hidden = true; $('editBox').hidden = false; $('app').classList.add('editing'); $('editMsg').textContent = msg; $('editMsg').style.color = msg ? '#ff9b9b' : '';
     cg.set({ fen: placement, lastMove: undefined, check: false, movable: { free: true, color: 'both', dests: undefined, showDests: false },
       draggable: { deleteOnDropOff: true } });
     cg.setShapes([]); cg.setAutoShapes([]); setBar($('bar'), null, orientation, false); $('ev').textContent = ''; $('pv').textContent = '';
@@ -503,7 +503,7 @@ async function laptop() {
     ERR_PAWNS_ON_BACKRANK: 'There is a pawn on the first or last rank.', ERR_EMPTY: 'The board is empty.' };
   function legal(fen) { const s = parseFen(fen); if (s.isErr) return 'Bad position.'; const p = Chess.fromSetup(s.value); return p.isErr ? (WHY[p.error.message] || 'Not a legal position.') : null; }
   function leaveEdit(fen) {
-    mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true;
+    mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing');
     if (fen) { setRoot(fen); pendingDoc = null; }      // our new position is the newest edit: it wins over what arrived meanwhile
     else { ({ root, cur, label } = editBackup); nodes.clear(); for (const [k, v] of editBackup.nodes) nodes.set(k, v); }
     show(); renderStage();
@@ -565,7 +565,7 @@ async function laptop() {
     status(`Read in ${(r.ms / 1000).toFixed(1)} s.` + (unsure.length ? ` ${unsure.length} square(s) unsure (red).` : ''), unsure.length ? 'warn' : '');
     // enterEdit first keeps the previous position/label in its backup, so Cancel goes fully back
     if (why) { enterEdit(r.placement, 'w', 'Scan needs a fix: ' + why); cg.set({ orientation }); label = nextLabel; return; }
-    if (mode === 'edit') { mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; pendingDoc = null; }
+    if (mode === 'edit') { mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing'); pendingDoc = null; }
     label = nextLabel;
     setRoot(fen); show(); markUnsure(); scanBar();
   }
