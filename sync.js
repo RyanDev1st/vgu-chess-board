@@ -13,7 +13,11 @@ export async function roomConfig() {
   const hash = new URLSearchParams(location.hash.slice(1)), get = k => hash.get(k) || new URLSearchParams(location.search).get(k);
   let key = local ? get('room') : null, cams = local ? get('cams') : null;
   try { localStorage.removeItem('roomKey'); localStorage.removeItem('roomCams'); } catch {}
-  if (location.hash.includes('room=')) history.replaceState(null, '', location.pathname + location.search);
+  // One-time handoff from the stream laptop after Ryan approved a Commentator on the one link (server.mjs /go-board):
+  // #join=KEY&jcams=PREFIX is saved here and removed from the address, so this fixed site keeps working even if the
+  // stream laptop's tunnel or server restarts. (A key that is later locked out shows the "Not connected" banner.)
+  if (hash.get('join')) { try { localStorage.setItem('boardKey', hash.get('join')); localStorage.setItem('boardCams', hash.get('jcams') || ''); } catch {} }
+  if (/(^|[#&])(room|join)=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
   if (!key) { try { const r = await fetch('../room.json', { cache: 'no-store' }); if (r.ok) ({ key, cams } = await r.json()); } catch {} }
   if (!key) { try { key = localStorage.getItem('boardKey'); cams = cams || localStorage.getItem('boardCams'); } catch {} }
   return { key: key || '', cams: cams || '' };
