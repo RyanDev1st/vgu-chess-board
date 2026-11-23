@@ -163,7 +163,7 @@ async function laptop() {
     <div id="panel">
       <div class="box stagebox">
         <h3 class="vs">WHAT VIEWERS SEE</h3>
-        <div class="seg" id="mainSeg"><button data-main="board" title="S swaps board / camera">♟ Board</button><button data-main="feed">📷 Camera big</button><button data-main="grid">▦ All rooms</button><button data-main="break">☕ Break</button></div>
+        <div class="seg" id="mainSeg"><button data-main="board" title="S swaps board / camera">♟ Board</button><button data-main="feed">📷 Camera big</button><button data-main="grid">▦ All rooms</button><button data-main="info" title="Rooms, results and standings, full screen">🏆 Results</button><button data-main="break">☕ Break</button></div>
         <div class="seg" id="camSeg"><button data-cam="1">Room 1</button><button data-cam="2">Room 2</button><button data-cam="3">Room 3</button><button data-cam="4">Top</button></div>
         <div class="linkrow"><div class="link" id="link">Connecting to the stream…</div><button id="helpBtn" title="Quick guide">? Guide</button></div>
       </div>
@@ -196,7 +196,10 @@ async function laptop() {
     </div></div>
     <div class="guide" id="access" hidden><div class="gcard">
       <h2>Join the commentary board</h2>
-      <p>Type your name and press <b>Ask to join</b>. The crew lets you in, then the board opens by itself. Only once per laptop.</p>
+      <p>Only once per laptop. Ryan lets you in, then the board opens by itself.</p>
+      <div class="astep">1. Your role</div>
+      <div class="roles" id="accRoles"><button data-role="Commentator">🎙 Commentator</button><button data-role="Tech crew">🎛 Tech crew</button><button data-role="Referee">🏁 Referee</button><button data-role="Organiser">📋 Organiser</button></div>
+      <div class="astep">2. Your name</div>
       <div class="arow"><input id="accName" maxlength="30" placeholder="Your name"><button class="primary" id="accBtn">Ask to join</button></div>
       <div id="accMsg" class="hint"></div>
       <button id="accSkip" class="small">Just practise (not shown on the stream)</button>
@@ -204,7 +207,7 @@ async function laptop() {
     <div class="guide" id="guide" hidden><div class="gcard">
       <h2>How it works (30 seconds)</h2>
       <ol>
-        <li><b>The top buttons choose what viewers see</b>: the board, a camera, all rooms, or the break screen.</li>
+        <li><b>The top buttons choose what viewers see</b>: the board, a camera, all rooms, the results, or the break screen.</li>
         <li><b>To show a game</b>: press its room under <b>PUT A ROOM'S GAME ON THIS BOARD</b>. Wrong square? Press <b>✏ Fix / set up position</b>.</li>
         <li><b>To explain</b>: drag pieces to play moves. <b>Right-drag</b> draws an arrow. <kbd>←</kbd> <kbd>→</kbd> go back and forward.</li>
         <li>Everything you do is shown on the stream and on your co-commentator's laptop straight away.</li>
@@ -218,6 +221,7 @@ async function laptop() {
   $('guide').onclick = e => { if (e.target.id === 'guide') guide(false); };
   addEventListener('keydown', e => { if (e.key === 'Escape' && !$('guide').hidden) guide(false); });
   // (the guide opens by itself once this laptop is in the room, see below)
+  if (DESK) $('engSw').closest('.box').style.display = 'none';   // no engine on the desk copy (see engine below)
   const status = (t, cls = '') => { $('status').textContent = t; $('status').className = cls; };
 
   // ---------- room (shared with the other laptop and the stream) ----------
@@ -230,16 +234,21 @@ async function laptop() {
   // no key on this laptop: ask the stream admin for it (sync.js requestAccess); approved -> saved here, page reloads into the room
   function askAccess() {
     let req = null; $('access').hidden = false;
-    try { $('accName').value = localStorage.getItem('accName') || ''; } catch {}
+    let role = 'Commentator';
+    try { $('accName').value = localStorage.getItem('accName') || ''; role = localStorage.getItem('accRole') || role; } catch {}
+    const roleBtns = [...document.querySelectorAll('#accRoles button')];
+    const setRole = r => { role = r; roleBtns.forEach(b => b.classList.toggle('on', b.dataset.role === r)); };
+    roleBtns.forEach(b => b.onclick = () => setRole(b.dataset.role)); setRole(role);
     const msg = t => $('accMsg').textContent = t;
     $('accBtn').onclick = () => {
       const name = $('accName').value.trim(); if (!name) { msg('Type your name first.'); return $('accName').focus(); }
+      try { localStorage.setItem('accRole', role); } catch {}
       try { localStorage.setItem('accName', name); } catch {}
       req && req.cancel(); $('accBtn').disabled = true; msg('⏳ Asking…');
       req = requestAccess(name, a => {
         if (a.ok) { try { localStorage.setItem('boardKey', a.key); localStorage.setItem('boardCams', a.cams); } catch {} msg('✅ Approved! Opening…'); setTimeout(() => location.reload(), 600); }
-        else { $('accBtn').disabled = false; msg('❌ Not let in. Ask the tech crew, then press Ask to join again.'); }
-      }, code => msg(`⏳ Waiting for the admin to approve “${name}”. Your code: ${code} (the admin sees the same code). Keep this page open.`));
+        else { $('accBtn').disabled = false; msg('❌ Not let in. Ask Ryan, then press Ask to join again.'); }
+      }, code => msg(`⏳ Waiting for Ryan to let “${name}” (${role}) in. Your code: ${code} (Ryan sees the same code). Keep this page open.`), role);
     };
     $('accName').onkeydown = e => { if (e.key === 'Enter') $('accBtn').click(); };
     $('accSkip').onclick = () => { req && req.cancel(); $('access').hidden = true; };
@@ -354,11 +363,13 @@ async function laptop() {
   $('boardBox').addEventListener('wheel', e => { if (mode !== 'analysis') return; e.preventDefault(); if (e.deltaY > 0) $('next').click(); else $('prev').click(); }, { passive: false });
 
   // ---------- engine: Stockfish 19 lite (multi-threaded when the page is cross-origin isolated) ----------
-  const engine = (() => {
+  // The tech desk's copy (DESK) runs no engine: it sits on the stream laptop, next to OBS, and the commentators' laptops
+  // already send their lines. Laptops: 2 threads, depth 18 (about 2-5 s): enough for the bar, leaves the laptop smooth.
+  const engine = DESK ? { last: null, analyse() { showEval(); }, stop() {} } : (() => {
     const sf = new Worker(crossOriginIsolated ? 'lib/stockfish-19-lite.js' : 'lib/stockfish-19-lite-single.js');
     let ready = false, searching = false, pending = null, fen = null, turn = 'w', last = null;
     sf.onmessage = ({ data: line }) => {
-      if (line === 'uciok') { if (crossOriginIsolated) sf.postMessage(`setoption name Threads value ${Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 2))}`);
+      if (line === 'uciok') { if (crossOriginIsolated) sf.postMessage(`setoption name Threads value ${Math.max(1, Math.min(2, (navigator.hardwareConcurrency || 2) - 2))}`);
         sf.postMessage('setoption name Hash value 64'); sf.postMessage('isready'); }
       else if (line === 'readyok') { ready = true; if (pending) start(); }
       else if (line.startsWith('bestmove')) { searching = false; if (pending) start(); }
@@ -374,7 +385,7 @@ async function laptop() {
     function start() { if (!ready || !pending) return;
       if (searching) { sf.postMessage('stop'); return; }
       fen = pending; pending = null; turn = fen.split(' ')[1]; searching = true;
-      sf.postMessage(`position fen ${fen}`); sf.postMessage('go depth 22'); }
+      sf.postMessage(`position fen ${fen}`); sf.postMessage('go depth 18'); }
     return {
       get last() { return last; },
       analyse(f, pos) {

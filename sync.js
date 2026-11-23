@@ -53,7 +53,7 @@ const ECDH = { name: 'ECDH', namedCurve: 'P-256' }, ECDSA = { name: 'ECDSA', nam
 const aesFrom = (priv, pub, use) => C.deriveKey({ name: 'ECDH', public: pub }, priv, { name: 'AES-GCM', length: 256 }, false, [use]);
 
 // laptop side: ask until answered. onCode(code) once; onAnswer({ok, key, cams} | {ok:false})
-export function requestAccess(name, onAnswer, onCode = () => {}) {
+export function requestAccess(name, onAnswer, onCode = () => {}, role = '') {
   const rid = Math.random().toString(36).slice(2, 10);
   let done = false, l = null, t = 0;
   const finish = a => { if (done) return; done = true; clearInterval(t); l && l.close(); onAnswer(a); };
@@ -62,7 +62,7 @@ export function requestAccess(name, onAnswer, onCode = () => {}) {
     const admin = await C.importKey('jwk', ADMIN_PUB, ECDSA, false, ['verify']);
     onCode(await codeOf(raw));
     if (done) return;
-    const req = { t: 'req', rid, name, pub };
+    const req = { t: 'req', rid, name, role, pub };
     l = lobby(async m => {
       if (done || m.rid !== rid || typeof m.body !== 'string' || typeof m.sig !== 'string') return;
       try {
@@ -80,10 +80,11 @@ export function requestAccess(name, onAnswer, onCode = () => {}) {
   })();
   return { cancel: () => { done = true; clearInterval(t); l && l.close(); } };
 }
-// admin side: onList([{id, name, code, dup, at}]) when requests change; answer(id, approve, secrets) with secrets = room.json
+// admin side: onList([{id, name, role, code, dup, at}]) when requests change; answer(id, approve, secrets) with secrets = room.json
+// (role = what the person picked: Commentator / Tech crew / Referee / Organiser; their own word, shown to the admin)
 export function approveRequests(onList) {
   const reqs = new Map();                                    // sender connection -> { rid, name, pub, code, at, seen }
-  const list = () => { const all = [...reqs].map(([id, r]) => ({ id, name: r.name, code: r.code, at: r.at }));
+  const list = () => { const all = [...reqs].map(([id, r]) => ({ id, name: r.name, role: r.role, code: r.code, at: r.at }));
     for (const r of all) r.dup = all.filter(o => o.name.toLowerCase() === r.name.toLowerCase()).length > 1;
     onList(all); };
   const l = lobby(async (m, uuid) => {
@@ -92,7 +93,7 @@ export function approveRequests(onList) {
     if (r && r.rid === m.rid) { r.seen = Date.now(); return; }
     if (!r && reqs.size >= 20) return;                       // flood guard
     let code; try { code = await codeOf(unb64(m.pub)); } catch { return; }
-    reqs.set(uuid, { rid: m.rid, name: String(m.name || '?').slice(0, 30), pub: m.pub, code, at: Date.now(), seen: Date.now() }); list();
+    reqs.set(uuid, { rid: m.rid, name: String(m.name || '?').slice(0, 30), role: String(m.role || '').slice(0, 20), pub: m.pub, code, at: Date.now(), seen: Date.now() }); list();
   });
   setInterval(() => { let ch = false; for (const [k, r] of reqs) if (Date.now() - r.seen > 10000) { reqs.delete(k); ch = true; } if (ch) list(); }, 2000);
   return {
