@@ -188,7 +188,7 @@ async function laptop() {
         <div class="spare cg-wrap" id="spare"></div>
         <div class="row fix"><span>Scan off by a square? Move everything:</span><button data-shift="-1,0" title="← key">◀</button><button data-shift="1,0" title="→ key">▶</button>
           <button data-shift="0,1" title="↑ key">▲</button><button data-shift="0,-1" title="↓ key">▼</button><button id="rotBtn" title="Turn the whole position around (R)">↻ 180°</button></div>
-        <div class="hint">Drag pieces in from here · drag a piece off the board to remove it · red = the scan wasn't sure.</div>
+        <div class="hint">Add pieces: drag one onto the board, or click one here and then click squares (click it again to stop). Drag a piece off the board to remove it. Red = the scan wasn&rsquo;t sure.</div>
         <div class="row"><button id="turnBtn">White to move</button><button id="clearBtn">Clear board</button><button id="startEdit">Start position</button></div>
         <div class="row"><button class="primary" id="doneBtn">Done: analyse</button><button id="cancelBtn">Cancel</button></div>
         <div id="editMsg" class="hint"></div>
@@ -253,7 +253,7 @@ async function laptop() {
   }
 
   // ---------- state ----------
-  let nid = 0, root, cur, orientation = 'white', mode = 'analysis', engineOn = true;
+  let nid = 0, root, cur, orientation = 'white', mode = 'analysis', engineOn = true, pick = null;   // pick = tray piece chosen for click-to-place
   let label = 'Live board', unsure = [], editTurn = 'w', editBackup = null, analysedFen = null;
   const nodes = new Map();
   const mk = (fen, extra = {}) => { const n = { id: `${myId}.${++nid}`, fen, children: [], parent: null, shapes: [], ...extra }; nodes.set(n.id, n); return n; };
@@ -265,7 +265,10 @@ async function laptop() {
     draggable: { showGhost: true },
     drawable: { enabled: true, brushes: L_BRUSHES, onChange: shapes => { if (mode !== 'analysis') return;
       cur.shapes = fromCg(shapes, cur.shapes || []); cg.setShapes(toCg(cur.shapes, orientation)); commit(); } },
-    events: { change: () => { if (mode === 'edit') { const t = cg.state.lastMove || []; unsure = unsure.filter(s => !t.includes(s)); markUnsure(); } } } });
+    events: { change: () => { if (mode === 'edit') { const t = cg.state.lastMove || []; unsure = unsure.filter(s => !t.includes(s)); markUnsure(); } },
+      select: key => { if (mode === 'edit' && pick) {            // a tray piece is picked: each click puts one there
+        cg.setPieces(new Map([[key, { color: pick.color, role: pick.role }]])); cg.selectSquare(null);
+        unsure = unsure.filter(s => s !== key); markUnsure(); } } } });
   const markUnsure = () => cg.set({ highlight: { custom: new Map(unsure.map(s => [s, 'unsure'])) } });
 
   function show() {                                   // put the current node on the board
@@ -461,11 +464,15 @@ async function laptop() {
   });
 
   // ---------- edit position (lichess editor style) ----------
+  // tray: drag a piece onto the board, or click it and then click squares (click it again to stop)
   for (const color of ['white', 'black']) for (const role of ROLES) {
     const p = h('piece', `${color} ${role}`);
-    p.addEventListener('mousedown', e => { if (mode !== 'edit') return; e.preventDefault(); cg.dragNewPiece({ color, role }, e, true); });
+    const drag = e => { if (mode !== 'edit') return; e.preventDefault(); cg.dragNewPiece({ color, role }, e, true); };
+    p.addEventListener('mousedown', drag); p.addEventListener('touchstart', drag, { passive: false });
+    p.addEventListener('click', () => setPick(pick && pick.el === p ? null : { color, role, el: p }));
     $('spare').append(p);
   }
+  function setPick(x) { pick = x; document.querySelectorAll('#spare piece').forEach(el => el.classList.toggle('picked', !!x && x.el === el)); }
   function enterEdit(placement = cur.fen.split(' ')[0], turn = cur.fen.split(' ')[1], msg = '') {
     document.querySelector('.promo')?.remove();
     if (mode !== 'edit') editBackup = { root, cur, label, nodes: new Map(nodes) };
@@ -503,7 +510,7 @@ async function laptop() {
     ERR_PAWNS_ON_BACKRANK: 'There is a pawn on the first or last rank.', ERR_EMPTY: 'The board is empty.' };
   function legal(fen) { const s = parseFen(fen); if (s.isErr) return 'Bad position.'; const p = Chess.fromSetup(s.value); return p.isErr ? (WHY[p.error.message] || 'Not a legal position.') : null; }
   function leaveEdit(fen) {
-    mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing');
+    mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing'); setPick(null);
     if (fen) { setRoot(fen); pendingDoc = null; }      // our new position is the newest edit: it wins over what arrived meanwhile
     else { ({ root, cur, label } = editBackup); nodes.clear(); for (const [k, v] of editBackup.nodes) nodes.set(k, v); }
     show(); renderStage();
@@ -565,7 +572,7 @@ async function laptop() {
     status(`Read in ${(r.ms / 1000).toFixed(1)} s.` + (unsure.length ? ` ${unsure.length} square(s) unsure (red).` : ''), unsure.length ? 'warn' : '');
     // enterEdit first keeps the previous position/label in its backup, so Cancel goes fully back
     if (why) { enterEdit(r.placement, 'w', 'Scan needs a fix: ' + why); cg.set({ orientation }); label = nextLabel; return; }
-    if (mode === 'edit') { mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing'); pendingDoc = null; }
+    if (mode === 'edit') { mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing'); setPick(null); pendingDoc = null; }
     label = nextLabel;
     setRoot(fen); show(); markUnsure(); scanBar();
   }
