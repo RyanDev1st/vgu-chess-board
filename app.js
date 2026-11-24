@@ -20,6 +20,22 @@ const stageOf = doc => { const st = {}; let any = false;
   return any ? st : null; };
 const posOf = fen => Chess.fromSetup(parseFen(fen).unwrap()).unwrap();
 const plyOf = fen => { const p = fen.split(' '); return (Number(p[5] || 1) - 1) * 2 + (p[1] === 'b' ? 1 : 0); };
+// free-form (2026-11-24, user: "the board to be free form, don't do white to move / black to move"): either side may move
+// at any time. A move by the side NOT to move is played from the same position with the turn handed over first.
+// The shared document stays plain UCI moves; every page replays them with this same rule.
+function flipped(fen) { const s = parseFen(fen).unwrap(); s.turn = s.turn === 'white' ? 'black' : 'white'; s.epSquare = undefined;
+  const p = Chess.fromSetup(s); return p.isErr ? null : p.unwrap(); }
+function moveAny(fen, uci) {                          // -> { pos (ready to play), norm } or null
+  const move = parseUci(uci); if (!move) return null;
+  let pos = posOf(fen);
+  if (!pos.isLegal(move)) { pos = flipped(fen); if (!pos || !pos.isLegal(move)) return null; }
+  return { pos, norm: normalizeMove(pos, move) };
+}
+function destsAny(fen) {                              // legal targets for both colours' pieces
+  const out = new Map(chessgroundDests(posOf(fen))), o = flipped(fen);
+  if (o) for (const [k, v] of chessgroundDests(o)) out.set(k, v);
+  return out;
+}
 
 // ---------- shared: eval text / bar, move list ----------
 const winPct = cp => 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
@@ -45,7 +61,8 @@ function renderMoveList(el, line, curId, onClick) {
   });
   for (const n of line) {
     const white = n.ply % 2 === 1;
-    if (white) { grid.append(h('div', 'n', String((n.ply + 1) / 2)), mv(n)); open = true; }
+    if (white) { if (open) grid.append(h('span', 'm', '…'));   // free-form: white moved twice in a row
+      grid.append(h('div', 'n', String((n.ply + 1) / 2)), mv(n)); open = true; }
     else { if (!open) grid.append(h('div', 'n', String(n.ply / 2)), h('span', 'm', '…')); grid.append(mv(n)); open = false; }
     if (n.vars && n.vars.length) {
       if (open) { grid.append(h('span', 'm', '')); open = false; }
@@ -108,9 +125,10 @@ function buildTree(doc) {
   nodes.set(root.id, root);
   for (const [id, pid, uci, shapes] of doc.nodes || []) {
     const parent = nodes.get(pid); if (!parent) continue;
-    const pos = posOf(parent.fen), move = parseUci(uci); if (!move || !pos.isLegal(move)) continue;
-    const norm = normalizeMove(pos, move), san = makeSan(pos, norm); pos.play(norm);
-    const n = { id, fen: makeFen(pos.toSetup()), uci, san, ply: parent.ply + 1, parent, children: [], shapes: shapes || [] };
+    const m = moveAny(parent.fen, uci); if (!m) continue;
+    const { pos, norm } = m, san = makeSan(pos, norm); pos.play(norm);
+    const fen = makeFen(pos.toSetup());
+    const n = { id, fen, uci, san, ply: plyOf(fen), parent, children: [], shapes: shapes || [] };
     parent.children.push(n); nodes.set(id, n);
   }
   return { root, nodes, cur: nodes.get(doc.cur) || root };
@@ -182,6 +200,7 @@ async function laptop() {
         <button id="next" title="Forward (→)">▶</button><button id="last" title="End (↓)">⏭</button><button id="flip" title="Flip board (F)">⇅ Flip</button></div>
       <div class="box scan" id="scanBox">
         <h3>PUT A ROOM'S GAME ON THIS BOARD</h3>
+        <button class="primary getpos" id="getPos" title="G key">📸 Get position: <span id="getPosRoom">Room</span> (G)</button>
         <div class="cams" id="cams"></div>
         <div class="hint">Or paste a photo (<kbd>Ctrl</kbd>+<kbd>V</kbd>). <b>First time for each room:</b> click the board&rsquo;s 4 corners on the picture (remembered). Double-click the picture to redo them.</div>
         <canvas id="photo" width="390" height="0"></canvas>
@@ -194,7 +213,7 @@ async function laptop() {
         <div class="row fix"><span>Scan off by a square? Move everything:</span><button data-shift="-1,0" title="← key">◀</button><button data-shift="1,0" title="→ key">▶</button>
           <button data-shift="0,1" title="↑ key">▲</button><button data-shift="0,-1" title="↓ key">▼</button><button id="rotBtn" title="Turn the whole position around (R)">↻ 180°</button></div>
         <div class="hint">Add pieces: drag one onto the board, or click one here and then click squares (click it again to stop). Drag a piece off the board to remove it. Red = the scan wasn&rsquo;t sure.</div>
-        <div class="row"><button id="turnBtn">White to move</button><button id="clearBtn">Clear board</button><button id="startEdit">Start position</button></div>
+        <div class="row"><button id="clearBtn">Clear board</button><button id="startEdit">Start position</button></div>
         <div class="row"><button class="primary" id="doneBtn">✓ Done</button><button id="cancelBtn">Cancel</button></div>
         <div id="editMsg" class="hint"></div>
       </div>
@@ -274,7 +293,7 @@ async function laptop() {
     const pos = posOf(cur.fen), turn = pos.turn;
     cg.set({ fen: cur.fen, orientation, turnColor: turn, lastMove: cur.uci ? [cur.uci.slice(0, 2), cur.uci.slice(2, 4)] : undefined,
       check: pos.isCheck() ? turn : false,
-      movable: { free: false, showDests: true, color: pos.isEnd() ? undefined : turn, dests: pos.isEnd() ? new Map() : chessgroundDests(pos) },
+      movable: { free: false, showDests: true, color: 'both', dests: destsAny(cur.fen) },
       draggable: { deleteOnDropOff: false } });
     cg.setShapes(toCg(cur.shapes, orientation));
     if (cur !== root && unsure.length) { unsure = []; markUnsure(); }
@@ -283,13 +302,14 @@ async function laptop() {
     commit();
   }
   function play(uci) {
-    const pos = posOf(cur.fen), move = parseUci(uci);
-    if (!move || !pos.isLegal(move)) return show();
+    const m = moveAny(cur.fen, uci);
+    if (!m) return show();
     const found = cur.children.find(c => c.uci === uci);
     if (found) { cur = found; return show(); }
-    const norm = normalizeMove(pos, move), san = makeSan(pos, norm);
+    const { pos, norm } = m, san = makeSan(pos, norm);
     pos.play(norm);
-    const child = mk(makeFen(pos.toSetup()), { uci, san, ply: cur.ply + 1, parent: cur });
+    const fen = makeFen(pos.toSetup());
+    const child = mk(fen, { uci, san, ply: plyOf(fen), parent: cur });
     cur.children.push(child); cur = child; show();
   }
   function onBoardMove(orig, dest) {
@@ -424,6 +444,7 @@ async function laptop() {
       b.classList.toggle('fail', !!failed); b.title = failed ? 'OBS did not switch scene: is OBS open on the stream laptop? Press again.' : '';
     });
     document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.classList.toggle('on', +b.dataset.cam === stage.cam));
+    const gp = $('getPosRoom'); if (gp) gp.textContent = (CAMS[(stage.cam || 4) - 1] || CAMS[3])[1];
   }
     function renderLink(list = peers) {
     peers = list;
@@ -466,7 +487,6 @@ async function laptop() {
     document.querySelector('.promo')?.remove();
     if (mode !== 'edit') editBackup = { root, cur, label, nodes: new Map(nodes) };
     mode = 'edit'; editTurn = turn; engine.stop(); analysedFen = null; $('scanbar').hidden = true;
-    $('turnBtn').textContent = editTurn === 'w' ? 'White to move' : 'Black to move';
     $('scanBox').hidden = true; $('editBox').hidden = false; $('app').classList.add('editing'); $('editMsg').textContent = msg; $('editMsg').style.color = msg ? '#ff9b9b' : '';
     cg.set({ fen: placement, lastMove: undefined, check: false, movable: { free: true, color: 'both', dests: undefined, showDests: false },
       draggable: { deleteOnDropOff: true } });
@@ -495,8 +515,10 @@ async function laptop() {
     if (at('e', 8) === 'k') { if (at('h', 8) === 'r') c += 'k'; if (at('a', 8) === 'r') c += 'q'; }
     return `${placement} ${turn} ${c || '-'} - 0 1`;
   }
-  const WHY = { ERR_KINGS: 'Each side needs exactly one king.', ERR_OPPOSITE_CHECK: 'The side NOT to move is in check: switch who is to move.',
+  const WHY = { ERR_KINGS: 'Each side needs exactly one king.', ERR_OPPOSITE_CHECK: 'Both kings are in check.',
     ERR_PAWNS_ON_BACKRANK: 'There is a pawn on the first or last rank.', ERR_EMPTY: 'The board is empty.' };
+  // free-form: nobody picks who is to move; the side that makes the position legal (the one giving check moves last)
+  const fenAuto = (placement, pref = 'w') => { const a = fenFrom(placement, pref); return legal(a) ? fenFrom(placement, pref === 'w' ? 'b' : 'w') : a; };
   function legal(fen) { const s = parseFen(fen); if (s.isErr) return 'Bad position.'; const p = Chess.fromSetup(s.value); return p.isErr ? (WHY[p.error.message] || 'Not a legal position.') : null; }
   function leaveEdit(fen) {
     mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing'); setPick(null);
@@ -505,10 +527,9 @@ async function laptop() {
     show(); renderStage();
     if (!fen && pendingDoc) { const d = pendingDoc; pendingDoc = null; seen.board = null; adopt(d); }   // Cancel: catch up with the other laptop
   }
-  $('turnBtn').onclick = () => { editTurn = editTurn === 'w' ? 'b' : 'w'; $('turnBtn').textContent = editTurn === 'w' ? 'White to move' : 'Black to move'; };
   $('clearBtn').onclick = () => { cg.set({ fen: '8/8/8/8/8/8/8/8' }); unsure = []; markUnsure(); };
-  $('startEdit').onclick = () => { cg.set({ fen: INITIAL_FEN.split(' ')[0] }); editTurn = 'w'; $('turnBtn').textContent = 'White to move'; unsure = []; markUnsure(); };
-  $('doneBtn').onclick = () => { const fen = fenFrom(cg.getFen(), editTurn), why = legal(fen);
+  $('startEdit').onclick = () => { cg.set({ fen: INITIAL_FEN.split(' ')[0] }); editTurn = 'w'; unsure = []; markUnsure(); };
+  $('doneBtn').onclick = () => { const fen = fenAuto(cg.getFen(), editTurn), why = legal(fen);
     if (why) { $('editMsg').textContent = why; $('editMsg').style.color = '#ff9b9b'; return; } leaveEdit(fen); };
   $('cancelBtn').onclick = () => { unsure = []; markUnsure(); leaveEdit(null); };
   $('editBtn').onclick = () => enterEdit();
@@ -628,7 +649,7 @@ async function laptop() {
     }
     window.__lastScan = r;
     orientation = r.orientation; unsure = r.unsure;
-    const fen = fenFrom(r.placement, 'w'), why = legal(fen);
+    const fen = fenAuto(r.placement), why = legal(fen);
     status(`Read in ${(r.ms / 1000).toFixed(1)} s (picture ${frame.width}×${frame.height}).` + (unsure.length ? ` ${unsure.length} square(s) unsure (red).` : '') +
       (crops[cropKey] ? '' : ' Tip: click the board’s 4 corners on the picture for a much better read.'), unsure.length || !crops[cropKey] ? 'warn' : '');
     // enterEdit first keeps the previous position/label in its backup, so Cancel goes fully back
@@ -637,17 +658,13 @@ async function laptop() {
     label = nextLabel;
     setRoot(fen); show(); markUnsure(); scanBar();
   }
-  // after a scan: who is to move can't be seen in a photo, so offer the switch right there
+  // after a scan: a short note (who is to move doesn't matter: either side can move)
   function scanBar() {
     const b = $('scanbar'); b.hidden = false; b.innerHTML = '';
-    const turn = root.fen.split(' ')[1];
-    b.append(h('span', '', `Scanned from ${label}${unsure.length ? ` · check the ${unsure.length} red square(s)` : ''} ·`));
-    const t = h('button', '', turn === 'w' ? 'White to move ⇄' : 'Black to move ⇄');
-    t.onclick = () => { if (mode !== 'analysis') return; const fen = fenFrom(root.fen.split(' ')[0], turn === 'w' ? 'b' : 'w'), why = legal(fen); if (why) return status(why, 'err');
-      setRoot(fen); show(); markUnsure(); scanBar(); };
+    b.append(h('span', '', `Scanned from ${label}${unsure.length ? ` · check the ${unsure.length} red square(s)` : ''} · either side can move ·`));
     const ed = h('button', '', '✏ Fix'); ed.onclick = () => enterEdit();
     const x = h('button', '', '✕'); x.onclick = () => { b.hidden = true; };
-    b.append(t, ed, x);
+    b.append(ed, x);
   }
   async function useImage(img, key, name) { frame = await createImageBitmap(img); cropKey = key; nextLabel = name; clicks = [];
     // a camera seen for the first time: ask for the corners first (a room camera shows 4 boards; guessing gives junk and
@@ -674,7 +691,7 @@ async function laptop() {
       // ask the phone for its full picture and a high bitrate, the same control messages the official viewer sends with
       // &scale=100&bitrate= (raw on the data channel: the SDK's sendData wraps everything as chat, which the phone ignores)
       vdo.addEventListener('dataChannelOpen', () => { for (const [, cn] of vdo.connections || []) { const dc = cn.viewer && cn.viewer.dataChannel;
-        if (dc && dc.readyState === 'open') try { dc.send(JSON.stringify({ scale: 100 })); dc.send(JSON.stringify({ bitrate: 5000 })); } catch {} } });
+        if (dc && dc.readyState === 'open') try { dc.send(JSON.stringify({ scale: 100 })); dc.send(JSON.stringify({ bitrate: 8000 })); } catch {} } });
       try { await vdo.connect(); await vdo.view(PH + 'c' + (i + 1), { audio: false, video: true }); }
       catch (e) { camConn[i] = null; try { vdo.disconnect(); } catch {} throw e; }
     }
@@ -704,14 +721,21 @@ async function laptop() {
   const grabCam = (i, quick) => vdoFrame(i, quick);
   // connect to a room phone ahead of time (the first connection takes 5-15 s); kept 5 min like a grab
   function warm(i) { if (i >= 0 && i < 4 && PH && !camConn[i]) vdoFrame(i, true).catch(() => {}); }
-  CAMS.forEach(([source, name], i) => {
+  async function grabRoom(i, follow = true) { const [source, name] = CAMS[i];
+    status(`Grabbing ${name}…`); if (follow) setCam(i + 1);   // the stream's room follows the scanned board
+    try { const f = await grabCam(i, !crops[source]); camIdx = i; await useImage(f, source, name); }   // no corners yet: show the first frame at once, sharpen while they click
+    catch (e) { status(`Could not grab ${name}: ${e.message}`, 'err'); } }
+  CAMS.forEach(([, name], i) => {
     const b = h('button', '', name);
-    b.onclick = async () => { status(`Grabbing ${name}…`); setCam(i + 1);   // the stream's room follows the scanned board
-      try { const f = await grabCam(i, !crops[source]); camIdx = i; await useImage(f, source, name); }   // no corners yet: show the first frame at once, sharpen while they click
-      catch (e) { status(`Could not grab ${name}: ${e.message}`, 'err'); } };
+    b.onclick = () => grabRoom(i);
     b.addEventListener('mouseenter', () => warm(i));
     $('cams').append(b);
   });
+  // one button: the position of the room that is on the stream right now (2026-11-24, user: "a quick button to get the pos on the board")
+  const getPos = () => { if (mode === 'edit') return; grabRoom((stage.cam || 4) - 1, false); };
+  $('getPos').onclick = getPos;
+  $('getPos').addEventListener('mouseenter', () => warm((stage.cam || 4) - 1));
+  addEventListener('keydown', e => { if (e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.repeat && !e.target.closest('input,textarea')) getPos(); });
   addEventListener('paste', e => { const f = [...e.clipboardData.items].find(i => i.type.startsWith('image/')); if (f) camIdx = null, useImage(f.getAsFile(), 'paste', 'Screenshot'); });
   addEventListener('dragover', e => e.preventDefault());
   addEventListener('drop', e => { e.preventDefault(); const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/')); if (f) { camIdx = null; useImage(f, 'paste', 'Screenshot'); } });
