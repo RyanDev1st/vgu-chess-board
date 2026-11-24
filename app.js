@@ -5,7 +5,7 @@
 // VDO.Ninja data room (sync.js) and show the same document: moves, current move, arrows, flip, stream layout.
 import { Chessground } from './lib/chessground.min.js';
 import { Chess, normalizeMove, parseFen, makeFen, INITIAL_FEN, makeSan, parseUci, chessgroundDests } from './lib/chessops.js';
-import { roomConfig, joinRoom, requestAccess } from './sync.js';
+import { roomConfig, joinRoom, loginWithPassword } from './sync.js';
 
 const Q = new URLSearchParams(location.search), VIEW = Q.has('view'), STAGE = Q.get('view') === 'stage', DESK = Q.has('desk');   // desk: the tech desk's board tab
 const LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';   // the stream machine (OBS is here)
@@ -64,8 +64,13 @@ function pathTo(cur) { const out = []; for (let x = cur; x && x.parent; x = x.pa
 // ---------- knight arrows drawn as an L (chess.com style) ----------
 // Stored shapes are plain {orig, dest, brush}. On the board a knight jump becomes chessground's straight arrow in an
 // invisible brush (so right-click erase still works) plus an L drawn with customSvg (a 100x100 box on the start square).
-const BRUSH = { green: ['#15781B', 1, 10], red: ['#882020', 1, 10], blue: ['#003088', 1, 10], yellow: ['#e68f00', 1, 10], paleBlue: ['#003088', .4, 15] };
+// Arrow / circle colours (2026-11-24, user: the green arrows vanished on the green board). chessground names its four drawing brushes
+// green (plain right-drag), red (Shift or Ctrl), blue (Alt), yellow (Shift+Alt): we keep the names, but the colours are now
+// orange, red, violet, yellow: none green, all solid. The engine's own arrow (paleBlue, laptop only) is translucent dark blue.
+const BRUSH = { green: ['#ff6a00', 1, 10], red: ['#e0102a', 1, 10], blue: ['#9b30ff', 1, 10], yellow: ['#ffd800', 1, 10], paleBlue: ['#003088', .4, 15] };
+const USER_BRUSHES = Object.fromEntries(Object.entries(BRUSH).map(([k, [color, opacity, lineWidth]]) => [k, { key: k, color, opacity, lineWidth }]));
 const L_BRUSHES = Object.fromEntries(Object.keys(BRUSH).map(k => ['L' + k, { key: 'L' + k, color: BRUSH[k][0], opacity: .001, lineWidth: 10 }]));
+const ALL_BRUSHES = { ...USER_BRUSHES, ...L_BRUSHES };
 const fileOf = s => s.charCodeAt(0) - 97, rankOf = s => +s[1] - 1, sq = (f, r) => String.fromCharCode(97 + f) + (r + 1);
 const knightJump = (o, d) => !!(o && d) && Math.abs(fileOf(o) - fileOf(d)) * Math.abs(rankOf(o) - rankOf(d)) === 2;
 function lArrow(o, d, brush, orientation) {
@@ -127,7 +132,7 @@ async function view() {
   const bar = evalBar(); root.prepend(bar);
   addEventListener('resize', () => document.body.dispatchEvent(new Event('chessground.resize')));
   const cg = Chessground(document.getElementById('vb'), { viewOnly: true, coordinates: true, animation: { duration: 220 },
-    drawable: { enabled: false, visible: true, brushes: L_BRUSHES } });
+    drawable: { enabled: false, visible: true, brushes: ALL_BRUSHES } });
   const $ = id => document.getElementById(id);
   let tree = null, doc = null, ev = null;
   function draw() {
@@ -196,11 +201,8 @@ async function laptop() {
     </div></div>
     <div class="guide" id="access" hidden><div class="gcard">
       <h2>Join the commentary board</h2>
-      <p>Only once per laptop. Ryan lets you in, then the board opens by itself.</p>
-      <div class="astep">1. Your role</div>
-      <div class="roles" id="accRoles"><button data-role="Commentator">🎙 Commentator</button><button data-role="Tech crew">🎛 Tech crew</button><button data-role="Referee">🏁 Referee</button><button data-role="Organiser">📋 Organiser</button></div>
-      <div class="astep">2. Your name</div>
-      <div class="arow"><input id="accName" maxlength="30" placeholder="Your name"><button class="primary" id="accBtn">Ask to join</button></div>
+      <p>Type the commentator password. You only do this once on this laptop.</p>
+      <div class="arow"><input id="accPw" type="password" autocomplete="off" placeholder="Commentator password"><button class="primary" id="accBtn">Join</button></div>
       <div id="accMsg" class="hint"></div>
       <button id="accSkip" class="small">Just practise (not shown on the stream)</button>
     </div></div>
@@ -228,30 +230,24 @@ async function laptop() {
   const { key, cams: PH } = await roomConfig();             // PH + c1..c4 = the room cameras' VDO.Ninja stream IDs
   let room = null, applying = false, pendingDoc = null;
   const myId = Math.random().toString(36).slice(2, 7);
-  if (key) room = joinRoom(key, { role: DESK ? 'desk' : 'laptop', onDoc: d => adopt(d), onMsg: (m) => onRoomMsg(m), onPeers: list => renderLink(list) });
+  if (key) room = joinRoom(key, { role: DESK ? 'desk' : 'laptop', onDoc: d => adopt(d), onMsg: (m) => onRoomMsg(m), onPeers: list => renderLink(list),
+    onBadKey: () => { try { localStorage.removeItem('boardKey'); } catch {} askAccess('The password was changed. Type the new one.'); } });
   if (key) { try { if (!DESK && !localStorage.getItem('guideSeen')) guide(true); } catch {} }
   else askAccess();
-  // no key on this laptop: ask the stream admin for it (sync.js requestAccess); approved -> saved here, page reloads into the room
-  function askAccess() {
-    let req = null; $('access').hidden = false;
-    let role = 'Commentator';
-    try { $('accName').value = localStorage.getItem('accName') || ''; role = localStorage.getItem('accRole') || role; } catch {}
-    const roleBtns = [...document.querySelectorAll('#accRoles button')];
-    const setRole = r => { role = r; roleBtns.forEach(b => b.classList.toggle('on', b.dataset.role === r)); };
-    roleBtns.forEach(b => b.onclick = () => setRole(b.dataset.role)); setRole(role);
+  // no key on this laptop (or the key stopped working): one field, the commentator password. Right -> the key is saved here and the page reloads into the room.
+  function askAccess(why = '') {
+    $('access').hidden = false; $('accMsg').textContent = why;
     const msg = t => $('accMsg').textContent = t;
-    $('accBtn').onclick = () => {
-      const name = $('accName').value.trim(); if (!name) { msg('Type your name first.'); return $('accName').focus(); }
-      try { localStorage.setItem('accRole', role); } catch {}
-      try { localStorage.setItem('accName', name); } catch {}
-      req && req.cancel(); $('accBtn').disabled = true; msg('⏳ Asking…');
-      req = requestAccess(name, a => {
-        if (a.ok) { try { localStorage.setItem('boardKey', a.key); localStorage.setItem('boardCams', a.cams); } catch {} msg('✅ Approved! Opening…'); setTimeout(() => location.reload(), 600); }
-        else { $('accBtn').disabled = false; msg('❌ Not let in. Ask Ryan, then press Ask to join again.'); }
-      }, code => msg(`⏳ Waiting for Ryan to let “${name}” (${role}) in. Your code: ${code} (Ryan sees the same code). Keep this page open.`), role);
+    const go = async () => {
+      const pw = $('accPw').value.trim(); if (!pw) { msg('Type the password first.'); return $('accPw').focus(); }
+      $('accBtn').disabled = true; msg('Checking…');
+      const a = await loginWithPassword(pw);
+      if (a.ok) { msg('Opening the board…'); setTimeout(() => location.reload(), 300); }
+      else { $('accBtn').disabled = false; msg(a.msg); $('accPw').select(); }
     };
-    $('accName').onkeydown = e => { if (e.key === 'Enter') $('accBtn').click(); };
-    $('accSkip').onclick = () => { req && req.cancel(); $('access').hidden = true; };
+    $('accBtn').onclick = go; $('accPw').onkeydown = e => { if (e.key === 'Enter') go(); };
+    $('accSkip').onclick = () => { $('access').hidden = true; };
+    $('accPw').focus();
   }
 
   // ---------- state ----------
@@ -265,7 +261,7 @@ async function laptop() {
   const cg = Chessground($('boardBox'), { coordinates: true, animation: { duration: 200 }, highlight: { lastMove: true, check: true },
     movable: { free: false, showDests: true, events: { after: onBoardMove } }, premovable: { enabled: false },
     draggable: { showGhost: true },
-    drawable: { enabled: true, brushes: L_BRUSHES, onChange: shapes => { if (mode !== 'analysis') return;
+    drawable: { enabled: true, brushes: ALL_BRUSHES, onChange: shapes => { if (mode !== 'analysis') return;
       cur.shapes = fromCg(shapes, cur.shapes || []); cg.setShapes(toCg(cur.shapes, orientation)); commit(); } },
     events: { change: () => { if (mode === 'edit') { const t = cg.state.lastMove || []; unsure = unsure.filter(s => !t.includes(s)); markUnsure(); } },
       select: key => { if (mode === 'edit' && pick) {            // a tray piece is picked: each click puts one there
@@ -318,7 +314,7 @@ async function laptop() {
     if (applying || timers[section] || (section === 'board' && mode !== 'analysis')) return;
     timers[section] = setTimeout(() => { timers[section] = null;
       const body = section === 'board' ? treeToDoc(root, cur, { orientation, label, engineOn }) : Object.fromEntries(STAGE_PARTS[section].map(f => [f, stage[f]]));
-      const d = room ? room.publish(section, body) : { ...local, [section]: body };
+      const d = room ? room.publish(section, body, section !== 'board') : { ...local, [section]: body };
       local = d; seen[section] = d[section]; saveLocal(d); }, 60);
   }
   let local = {};
@@ -429,22 +425,13 @@ async function laptop() {
     });
     document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.classList.toggle('on', +b.dataset.cam === stage.cam));
   }
-  let obsAt = Date.now();
-  function renderLink(list = peers) {
+    function renderLink(list = peers) {
     peers = list;
-    const el = $('link'); if (!room) { el.innerHTML = '⚠ Not on the stream yet. <button id="linkBtn">Ask to join</button>'; el.className = 'link bad';
+    const el = $('link'); if (!room) { el.innerHTML = '⚠ Not on the stream yet. <button id="linkBtn">Enter the password</button>'; el.className = 'link bad';
       $('linkBtn').onclick = () => askAccess(); return; }
     const obs = list.some(p => p.role === 'obs'), mates = list.filter(p => p.role === 'laptop').length;
-    if (obs) obsAt = Date.now();
-    el.textContent = (obs ? '✓ On the stream' : '⚠ Not on the stream') + (mates ? ` · your co-commentator is here too` : '');
+    el.textContent = (obs ? '✓ On the stream' : '⚠ Not on the stream: viewers do not see this board yet') + (obs && mates ? ` · your co-commentator is here too` : '');
     el.className = 'link' + (obs ? '' : ' bad');
-    if (!obs && Date.now() - obsAt > 15000) {          // wrong/old key (or the stream laptop is off): say so, offer to ask again
-      el.textContent = '⚠ Not on the stream: viewers do not see this board.';
-      const b = document.createElement('button'); b.textContent = 'Ask to join again';
-      b.onclick = () => { if (!confirm('Ask the crew to let you in again?')) return;
-        try { localStorage.removeItem('boardKey'); } catch {} location.reload(); };
-      el.append(' ', b);
-    }
   }
   function onRoomMsg(m) { if (m.t === 'obs') { obsAck = { onBreak: !!m.onBreak, ok: !!m.ok }; clearTimeout(ackTimer); renderStage(); } }
   function setMain(m) {
@@ -637,5 +624,5 @@ async function laptop() {
   if (fresh) { if (room) setTimeout(() => { if (!room.doc.board || room.doc.board.by === room.me) room.seed(fresh); }, 4000); else adopt(fresh); }
   renderStage(); renderLink();
   window.__test = { useImage, cg, play, get fen() { return cur.fen; }, get engine() { return engine.last; }, get mode() { return mode; },
-    nav: { go, root: () => root }, shiftAll, rotateAll, enterEdit, get shapes() { return cur.shapes; }, get doc() { return room?.doc; }, get stage() { return stage; }, setMain };
+    nav: { go, root: () => root }, shiftAll, rotateAll, enterEdit, get shapes() { return cur.shapes; }, get doc() { return room?.doc; }, get stage() { return stage; }, setMain, askAccess };
 }

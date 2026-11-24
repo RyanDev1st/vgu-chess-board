@@ -1,0 +1,170 @@
+<!doctype html>
+<!--
+  Commentator face phone. Runs the face tracker ON THE PHONE and sends only ~18 small numbers (30 times a second) to the
+  stream computer (vtuber/duo.html) through a VDO.Ninja data channel. Numbers get through bad Wi-Fi far better than video.
+  Link: <this page>#id=<face id>   (the id is the camera prefix + f1 or f2; it lives only in the link, never in this code)
+  Needs HTTPS (the camera only works there): https://ryandev1st.github.io/vgu-chess-board/face/
+  Files: core.js (the maths, shared with the stream computer), mp/ (MediaPipe + face model, saved here, no CDN).
+-->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Face phone</title>
+<style>
+  :root{--bg:#10161d;--ok:#1fbf6a;--warn:#f0a020;--bad:#e5484d}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:#fff;font-family:"Segoe UI",system-ui,Arial,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+  body{display:flex;gap:3vmin;padding:3vmin;padding-left:max(3vmin,env(safe-area-inset-left));padding-right:max(3vmin,env(safe-area-inset-right))}
+  .pic{flex:0 0 38%;position:relative;border-radius:2.5vmin;overflow:hidden;background:#000;align-self:stretch}
+  video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}       /* mirror, only for looking at yourself */
+  .main{flex:1;display:flex;flex-direction:column;justify-content:center;gap:2.5vmin;min-width:0}
+  #status{border-radius:3vmin;padding:4vmin 4vmin;font-weight:800;font-size:clamp(22px,6.2vmin,64px);line-height:1.15;background:#2a3440}
+  #status.ok{background:var(--ok);color:#052b17} #status.warn{background:var(--warn);color:#2e1c00} #status.bad{background:var(--bad)}
+  #sub{font-size:clamp(14px,3.4vmin,30px);line-height:1.35;color:#c8d2dc}
+  button{font:inherit;font-weight:700;font-size:clamp(14px,3.4vmin,28px);border:0;border-radius:2vmin;padding:2.2vmin 3vmin;background:#33414f;color:#fff;align-self:flex-start}
+  #tech{font:12px Consolas,monospace;color:#7e8b98;white-space:pre-wrap}
+  @media (orientation:portrait){body{flex-direction:column}.pic{flex:0 0 34%}}
+</style></head>
+<body>
+<div class="pic"><video id="v" playsinline muted autoplay></video></div>
+<div class="main">
+  <div id="status">Starting…</div>
+  <div id="sub"></div>
+  <button id="re">Reset my neutral face</button>
+  <div id="tech"></div>
+</div>
+<script src="../lib/vdoninja-sdk.min.js"></script>
+<script type="module">
+import { createTracker, pack } from './core.js';
+const $ = id => document.getElementById(id);
+const hash = new URLSearchParams(location.hash.replace(/^#/, '').includes('=') ? location.hash.slice(1) : 'id=' + location.hash.slice(1));
+const ID = (hash.get('id') || new URLSearchParams(location.search).get('id') || '').replace(/[^\w-]/g, '');
+const status = (cls, text, sub = '') => { $('status').className = cls; $('status').textContent = text; $('sub').textContent = sub; };
+status("", "Loading the face tracker…", "One moment (a one-time download of about 13 MB).");
+if (!ID) { status('bad', 'This link is not complete', 'Scan the face code on the crew page again.'); throw new Error('no id'); }
+
+// ---------- link to the stream computer: a small VDO.Ninja room that only this phone and the stream page know ----------
+const ROOM = 'vgubface_' + ID;
+const peers = new Set();
+let vdo = null, gen = 0, startedAt = 0, pongAt = 0, rtt = 0, seq = 0, sent = 0, sentAt = performance.now(), rate = 0;
+function connect() {
+  const my = ++gen; startedAt = Date.now(); peers.clear();
+  try { vdo && vdo.disconnect(); } catch {}
+  vdo = new VDONinjaSDK({ salt: 'vdo.ninja' });
+  const on = (ev, fn) => vdo.addEventListener(ev, e => { if (my === gen) fn(e.detail || {}); });
+  on('dataChannelOpen', ({ uuid }) => { peers.add(uuid); });
+  on('peerDisconnected', ({ uuid }) => { peers.delete(uuid); });
+  on('dataReceived', ({ data: m }) => {
+    if (!m || m.vgf !== 1) return;
+    if (m.t === 'pong') { pongAt = Date.now(); rtt = Date.now() - m.at; }
+    else if (m.t === 'c') tracker.recentre();                       // "Re-centre heads" on the crew desk
+  });
+  on('reconnectFailed', () => setTimeout(() => my === gen && connect(), 2000));
+  (async function go(wait = 3000) {                                 // no internet yet: keep trying
+    try { await vdo.autoConnect({ room: ROOM }); } catch { if (my === gen) setTimeout(() => go(Math.min(wait * 2, 15000)), wait); }
+  })();
+}
+function send(m) {
+  for (const u of peers) {
+    try { if ((vdo.getBufferedAmount(u) || 0) > 3000) continue; vdo.sendData({ vgf: 1, ...m }, u); } catch {}   // a clogged line: drop this one, never queue (stale numbers are worthless)
+  }
+}
+// every 2 s: a ping (the stream page answers: that is how we know it hears us); silence for 12 s: rebuild the connection
+setInterval(() => {
+  send({ t: 'ping', at: Date.now(), id: ID });
+  const quiet = Date.now() - Math.max(pongAt, startedAt);
+  if (quiet > 12000 && Date.now() - startedAt > 12000) connect();
+}, 2000);
+addEventListener('online', () => setTimeout(connect, 500));
+connect();
+
+// ---------- camera + tracker ----------
+const MP = new URL('./mp', location.href).href;
+const tracker = createTracker({ flip: hash.get('flip') === '-1' ? -1 : 1 });   // #flip=-1 mirrors left/right if an avatar turns the wrong way
+const video = $('v');
+let face = null, delegate = '', camTrack = null, faceAt = 0, frameAt = 0, errors = 0, loaded = false, camError = '', fps = 0, fcount = 0, fT = performance.now();
+const m = await import(`${MP}/vision_bundle.mjs`).catch(e => { status('bad', 'Could not load the face tracker', 'Check the internet, then reload this page. ' + e.message); throw e; });
+if (typeof window.dbg !== 'function') window.dbg = (...a) => console.debug(...a);
+const files = await m.FilesetResolver.forVisionTasks(`${MP}/wasm`);
+async function makeFace(gpu) {
+  const opts = { baseOptions: { modelAssetPath: `${MP}/face_landmarker.task`, delegate: gpu ? 'GPU' : 'CPU' }, runningMode: 'VIDEO', numFaces: 1,
+    outputFaceBlendshapes: true, outputFacialTransformationMatrixes: true };
+  const t = await m.FaceLandmarker.createFromOptions(files, opts); delegate = gpu ? 'GPU' : 'CPU'; return t;
+}
+async function buildFace(forceCpu) {
+  try { face && face.close(); } catch {}
+  face = null;
+  try { face = forceCpu ? await makeFace(false) : await makeFace(true); } catch { face = await makeFace(false); }
+  errors = 0; lastT = -1;
+}
+let lastT = -1;
+await buildFace(hash.has('cpu'));                          // #cpu=1: skip the GPU (if a phone's GPU misbehaves)
+loaded = true;
+
+async function startCamera() {
+  try { camTrack && camTrack.stop(); } catch {}
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } } });
+    camTrack = s.getVideoTracks()[0]; camError = ''; frameAt = Date.now();
+    camTrack.addEventListener('ended', () => setTimeout(startCamera, 1000));
+    video.srcObject = s; await video.play().catch(() => {});
+    tracker.recentre();
+  } catch (e) {
+    camError = e.name === 'NotAllowedError' ? 'blocked' : e.message;
+    setTimeout(startCamera, 4000);
+  }
+}
+startCamera();
+$('re').onclick = () => { tracker.recentre(); $('re').textContent = 'Done ✓ — now look at the screen, relaxed'; setTimeout(() => $('re').textContent = 'Reset my neutral face', 3000); };
+
+// keep the screen on; take it again when the tab comes back; restart the camera if it died while hidden
+let wake = null;
+async function keepAwake() { try { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); } catch {} }
+keepAwake();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (!wake) keepAwake();
+  if (!camTrack || camTrack.readyState !== 'live') startCamera(); else video.play().catch(() => {});
+  if (Date.now() - pongAt > 10000) connect();
+});
+
+function tick() {
+  const now = performance.now(), t0 = Date.now();
+  try {
+    if (face && video.readyState >= 2 && video.currentTime !== lastT) {
+      lastT = video.currentTime; frameAt = Date.now();
+      const r = face.detectForVideo(video, now);
+      if (r.faceLandmarks.length) {
+        const p = tracker.process({ lm: r.faceLandmarks[0], bs: r.faceBlendshapes[0], mx: r.facialTransformationMatrixes?.[0] }, now);
+        faceAt = Date.now(); seq++;
+        send({ t: 'p', s: seq, ts: t0, a: pack(p) });
+        sent++;
+      }
+      fcount++; errors = 0;
+    }
+  } catch (e) {                                           // one bad frame must not end tracking; many in a row: restart the tracker on the CPU
+    if (++errors === 40) buildFace(delegate === 'GPU').catch(() => {});
+  }
+}
+// new camera pictures wake us (best: no wasted work); a plain timer is the safety net if the browser skips those callbacks
+function frame() { tick(); if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(frame); else requestAnimationFrame(frame); }
+frame();
+setInterval(tick, 33);
+// a camera that stopped delivering pictures (phone locked, app switched): start it again
+setInterval(() => { if (loaded && Date.now() - frameAt > 5000 && !document.hidden) startCamera(); }, 1500);
+
+// ---------- what the phone holder sees ----------
+setInterval(() => {
+  const t = performance.now(); fps = fcount / ((t - fT) / 1000); fcount = 0; fT = t; rate = sent / ((t - sentAt) / 1000) ; sent = 0; sentAt = t;
+  const linked = Date.now() - pongAt < 7000, seen = Date.now() - faceAt < 1000;
+  if (camError === 'blocked') status('bad', 'The camera is blocked', 'Tap the lock icon next to the web address, allow Camera, then reload this page.');
+  else if (camError) status('bad', 'The camera will not start', 'Close other apps that use the camera. Trying again…');
+  else if (!seen) status('warn', "I can't see your face", 'Look at the phone and lean in a little. Good light on your face helps.');
+  else if (!linked) status('warn', 'Not connected to the stream computer yet', 'Your face is tracked. Keep this page open, it connects by itself.');
+  else status('ok', 'Tracking ✓ — keep this open', 'Phone on charge, screen on. You can talk normally.');
+  $('tech').textContent = `${delegate || '…'} · ${fps.toFixed(0)} pictures/s · ${rate.toFixed(0)} sent/s · link ${linked ? rtt + ' ms' : 'down'} · ${ID.slice(-2)}` +
+    (wake ? '' : ' · screen may turn off: set Screen timeout to Never');
+  window.faceState = { delegate, fps, rate, linked, seen, rtt, camError };
+}, 1000);
+</script>
+</body></html>
