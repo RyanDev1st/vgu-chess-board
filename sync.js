@@ -128,7 +128,7 @@ function serverPath(key, role, take, getDoc, onState) {
       const base = await serverBase(i > 0);
       if (base === null) { lastErr = 'no address'; continue; }
       try {
-        const r = await fetch(base + '/board-sync', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ key, role, ...body }), cache: 'no-store' });
+        const r = await fetch(base + '/board-sync', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: JSON.stringify({ key, role, ...body }), cache: 'no-store', signal: AbortSignal.timeout(35000) });   // the server answers a wait within 20 s: a half-dead tunnel must not stall this loop
         if (r.status === 403) { const e = new Error('key'); e.bad = true; throw e; }
         if (r.ok) return await r.json();
         lastErr = 'http ' + r.status;
