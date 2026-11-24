@@ -183,7 +183,7 @@ async function laptop() {
       <div class="box scan" id="scanBox">
         <h3>PUT A ROOM'S GAME ON THIS BOARD</h3>
         <div class="cams" id="cams"></div>
-        <div class="hint">Or paste a photo here (<kbd>Ctrl</kbd>+<kbd>V</kbd>).</div>
+        <div class="hint">Or paste a photo (<kbd>Ctrl</kbd>+<kbd>V</kbd>). <b>First time for each room:</b> click the board&rsquo;s 4 corners on the picture (remembered). Double-click the picture to redo them.</div>
         <canvas id="photo" width="390" height="0"></canvas>
         <div id="status">Loading the board reader…</div>
         <div class="row"><button id="editBtn" title="E">✏ Fix / set up position</button><button id="startBtn">↺ Start position</button></div>
@@ -443,7 +443,7 @@ async function laptop() {
       ackTimer = setTimeout(() => { if (!obsAck) { obsAck = { onBreak: !!stage.onBreak, ok: false }; renderStage(); } }, 5000);
     }
   }
-  const setCam = n => { stage.cam = n; renderStage(); commit('sCam'); };
+  const setCam = n => { stage.cam = n; renderStage(); commit('sCam'); warm(n - 1); };   // a room put on stream is the one likely to be scanned next
   document.querySelectorAll('#mainSeg button').forEach(b => b.onclick = () => setMain(b.dataset.main));
   document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.onclick = () => setCam(+b.dataset.cam));
   addEventListener('keydown', e => {
@@ -523,42 +523,116 @@ async function laptop() {
   read(blank.transferToImageBitmap()).then(r => { if (r.error) status('Board reader failed: ' + r.error, 'err');
     else if ($('status').textContent.startsWith('Loading')) status(''); });   // don't hide a grab already under way
 
-  let frame = null, cropKey = 'paste', drag = null;
+  // ---------- camera picture -> straightened board -> reader (rework 2026-11-24; user: "flaky, accuracy was low, partly low res") ----------
+  // 1. A sharp frame, straight from the room phone: wait until its video has grown to full size (a fresh video connection
+  //    starts small and sharpens over a few seconds; the old code read the very first, blurry frame), then take 3 frames
+  //    and keep the per-pixel median (less compression noise; a hand passing through one frame disappears).
+  //    (The stream laptop used to screenshot OBS's per-camera sources instead: 1280x720, cropped, and switched off while
+  //    not on screen. Not any more.)
+  // 2. The board's 4 corners, clicked once per camera and remembered: the angled board is straightened into a square, so
+  //    the reader's 8x8 grid really sits on the squares. (A straight box around a slanted board was the main accuracy loss.)
+  // 3. Read. If any square is unsure, read a contrast/colour-boosted copy too and keep the surer answer square by square.
+  let frame = null, cropKey = 'paste', drag = null, clicks = [];
   const crops = (() => { try { return JSON.parse(localStorage.getItem('crops') || '{}'); } catch { return {}; } })();
   const saveCrops = () => { try { localStorage.setItem('crops', JSON.stringify(crops)); } catch {} };
+  const quadOf = k => !k ? null : k.q ? k.q : [[k.x, k.y], [k.x + k.w, k.y], [k.x + k.w, k.y + k.h], [k.x, k.y + k.h]];   // old saved boxes still work
+  const order = pts => { const cx = pts.reduce((a, p) => a + p[0], 0) / 4, cy = pts.reduce((a, p) => a + p[1], 0) / 4;   // -> top-left, top-right, bottom-right, bottom-left
+    return [...pts].sort((p, q) => Math.atan2(p[1] - cy, p[0] - cx) - Math.atan2(q[1] - cy, q[0] - cx)); };
   function drawPhoto(box) {
     const c = $('photo'); if (!frame) return;
     c.width = 390; c.height = Math.round(390 * frame.height / frame.width);
     const g = c.getContext('2d'); g.drawImage(frame, 0, 0, c.width, c.height);
-    const k = box || crops[cropKey];
-    if (k) { g.fillStyle = '#000a'; g.beginPath(); g.rect(0, 0, c.width, c.height); g.rect(k.x * c.width, k.y * c.height, k.w * c.width, k.h * c.height); g.fill('evenodd');
-      g.strokeStyle = '#e3b341'; g.lineWidth = 2; g.strokeRect(k.x * c.width, k.y * c.height, k.w * c.width, k.h * c.height); }
+    const q = quadOf(box || crops[cropKey]), P = ([x, y]) => [x * c.width, y * c.height];
+    const path = () => { g.beginPath(); g.moveTo(...P(q[0])); for (const p of q.slice(1)) g.lineTo(...P(p)); g.closePath(); };
+    if (q && !clicks.length) { g.fillStyle = '#000a'; path(); g.rect(0, 0, c.width, c.height); g.fill('evenodd');
+      g.strokeStyle = '#ff7a00'; g.lineWidth = 2; path(); g.stroke(); }
+    g.fillStyle = '#ff7a00'; for (const p of clicks) { g.beginPath(); g.arc(...P(p), 5, 0, 7); g.fill(); }
+    if (clicks.length || !q) { g.font = 'bold 15px sans-serif'; g.fillStyle = '#000b'; g.fillRect(0, 0, c.width, 24); g.fillStyle = '#ffb36b';
+      g.fillText(clicks.length ? `Click corner ${clicks.length + 1} of 4` : 'Click the 4 corners of the board', 8, 17); }
   }
   const rel = e => { const r = $('photo').getBoundingClientRect(); return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))]; };
   const boxOf = (a, b) => ({ x: Math.min(a[0], b[0]), y: Math.min(a[1], b[1]), w: Math.abs(a[0] - b[0]), h: Math.abs(a[1] - b[1]) });
-  $('photo').addEventListener('mousedown', e => { if (frame) drag = rel(e); });
-  addEventListener('mousemove', e => { if (drag) drawPhoto(boxOf(drag, rel(e))); });
-  addEventListener('mouseup', e => { if (!drag) return; const box = boxOf(drag, rel(e)); drag = null;
-    if (box.w > .05 && box.h > .05) { crops[cropKey] = box; saveCrops(); scan(); } else drawPhoto(); });
-  $('photo').addEventListener('dblclick', () => { delete crops[cropKey]; saveCrops(); scan(); });
+  // click = a corner (4 clicks = done); drag = a straight box, as before
+  $('photo').addEventListener('mousedown', e => { if (frame) drag = { at: rel(e), moved: false }; });
+  addEventListener('mousemove', e => { if (!drag) return; const p = rel(e);
+    if (Math.hypot(p[0] - drag.at[0], p[1] - drag.at[1]) > .03) drag.moved = true;
+    if (drag.moved) { clicks = []; drawPhoto(boxOf(drag.at, p)); } });
+  addEventListener('mouseup', e => { if (!drag) return; const d = drag, p = rel(e); drag = null;
+    if (d.moved) { const box = boxOf(d.at, p); if (box.w > .05 && box.h > .05) { crops[cropKey] = box; saveCrops(); scan(); } else drawPhoto(); return; }
+    clicks.push(p); if (clicks.length < 4) return drawPhoto();
+    crops[cropKey] = { q: order(clicks) }; clicks = []; saveCrops();
+    // a camera's first time: the picture shown for clicking was the first quick frame; read a fresh, sharp one
+    if (camIdx != null) { const i = camIdx; status('Getting a sharp picture…'); vdoFrame(i).then(f => { if (camIdx === i) { frame = f; scan(); } }, e => status('Could not grab: ' + e.message, 'err')); }
+    else scan(); });
+  $('photo').addEventListener('dblclick', () => { clicks = []; delete crops[cropKey]; saveCrops(); drawPhoto(); status('Click the 4 corners of the board on the picture.', 'warn'); });
+
+  // the unit square -> the clicked quad (Heckbert's square-to-quad projective map), in source pixels
+  function homography([[x0, y0], [x1, y1], [x2, y2], [x3, y3]]) {
+    const dx1 = x1 - x2, dx2 = x3 - x2, sx = x0 - x1 + x2 - x3, dy1 = y1 - y2, dy2 = y3 - y2, sy = y0 - y1 + y2 - y3;
+    const den = dx1 * dy2 - dx2 * dy1, g = (sx * dy2 - dx2 * sy) / den, h = (dx1 * sy - sx * dy1) / den;
+    return [x1 - x0 + g * x1, x3 - x0 + h * x3, x0, y1 - y0 + g * y1, y3 - y0 + h * y3, y0, g, h];
+  }
+  let srcPix = null;                                   // the frame's pixels, read once per frame
+  function warp(q, S = 644) {                          // 644 = the reader's input size: no second resize
+    const W = frame.width, H = frame.height;
+    if (!srcPix || srcPix.frame !== frame) { const cv = new OffscreenCanvas(W, H), cg2 = cv.getContext('2d', { willReadFrequently: true }); cg2.drawImage(frame, 0, 0); srcPix = { frame, d: cv2d(cg2, W, H) }; }
+    const src = srcPix.d, [a, b, c, d, e, f, g, h] = homography(q.map(([x, y]) => [x * W, y * H]));
+    const out = new ImageData(S, S), o = out.data;
+    for (let j = 0; j < S; j++) { const v = (j + .5) / S;
+      for (let i = 0; i < S; i++) { const u = (i + .5) / S, w = g * u + h * v + 1;
+        const x = Math.min(W - 1.001, Math.max(0, (a * u + b * v + c) / w - .5)), y = Math.min(H - 1.001, Math.max(0, (d * u + e * v + f) / w - .5));
+        const xi = x | 0, yi = y | 0, fx = x - xi, fy = y - yi, p = (yi * W + xi) * 4, p2 = p + W * 4, k = (j * S + i) * 4;
+        for (let ch = 0; ch < 3; ch++)
+          o[k + ch] = (src[p + ch] * (1 - fx) + src[p + 4 + ch] * fx) * (1 - fy) + (src[p2 + ch] * (1 - fx) + src[p2 + 4 + ch] * fx) * fy;
+        o[k + 3] = 255; } }
+    return out;
+  }
+  const cv2d = (g, W, H) => g.getImageData(0, 0, W, H).data;
+  // contrast + colour: stretch each channel between its 1st and 99th percentile (also evens out yellow room light), +30% saturation
+  function boost(img) {
+    const d = img.data, n = d.length / 4, out = new ImageData(img.width, img.height), o = out.data, lo = [], hi = [];
+    for (let ch = 0; ch < 3; ch++) { const hist = new Uint32Array(256); for (let p = ch; p < d.length; p += 4) hist[d[p]]++;
+      let acc = 0, l = 0, top = 255; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc < n * .01) l = v; if (acc < n * .99) top = v + 1; }
+      lo[ch] = l; hi[ch] = Math.max(l + 24, top); }
+    for (let p = 0; p < d.length; p += 4) {
+      const r = (d[p] - lo[0]) * 255 / (hi[0] - lo[0]), g = (d[p + 1] - lo[1]) * 255 / (hi[1] - lo[1]), b = (d[p + 2] - lo[2]) * 255 / (hi[2] - lo[2]);
+      const y = .299 * r + .587 * g + .114 * b;
+      o[p] = y + (r - y) * 1.3; o[p + 1] = y + (g - y) * 1.3; o[p + 2] = y + (b - y) * 1.3; o[p + 3] = 255; }
+    return out;
+  }
+  const placementOf = board => [0, 1, 2, 3, 4, 5, 6, 7].map(k => board.slice(k * 8, k * 8 + 8).replace(/\.+/g, m => m.length)).join('/');
+  function merge(A, B) {                               // per square: the surer of the two reads
+    const board = [], sure = [];
+    for (let s = 0; s < 64; s++) { const p = B.sure[s] > A.sure[s] ? B : A; board.push(p.board[s]); sure.push(p.sure[s]); }
+    const sum = r => r.sure.reduce((x, y) => x + y, 0), o = sum(B) > sum(A) ? B : A, b = board.join('');
+    return { board: b, sure, placement: placementOf(b), orientation: o.orientation, ms: A.ms + B.ms,
+      unsure: sure.flatMap((p, s) => p < .7 ? ['abcdefgh'[s % 8] + (8 - (s >> 3))] : []) };
+  }
 
   let scanSeq = 0, nextLabel = label;
   async function scan() {
     if (!frame) return;
     const seq = ++scanSeq;                             // grabbing two cameras quickly: only the last one counts
     drawPhoto();
-    const k = crops[cropKey] || { x: 0, y: 0, w: 1, h: 1 };
-    const sx = k.x * frame.width, sy = k.y * frame.height, sw = k.w * frame.width, sh = k.h * frame.height;
+    const q = quadOf(crops[cropKey]) || [[0, 0], [1, 0], [1, 1], [0, 1]];
     status('Reading the board…');
-    const r = await read(await createImageBitmap(frame, sx, sy, sw, sh));
+    const img = warp(q); window.__lastWarp = img;
+    let r = await read(await createImageBitmap(img));
     if (seq !== scanSeq) return;
     if (r.error) return status('Could not read the board: ' + r.error, 'err');
+    if (r.unsure.length && r.sure) {
+      status(`Reading again with more contrast (${r.unsure.length} unsure)…`);
+      const r2 = await read(await createImageBitmap(boost(img)));
+      if (seq !== scanSeq) return;
+      if (!r2.error && r2.sure) r = merge(r, r2);
+    }
     window.__lastScan = r;
     orientation = r.orientation; unsure = r.unsure;
     const fen = fenFrom(r.placement, 'w'), why = legal(fen);
-    status(`Read in ${(r.ms / 1000).toFixed(1)} s.` + (unsure.length ? ` ${unsure.length} square(s) unsure (red).` : ''), unsure.length ? 'warn' : '');
+    status(`Read in ${(r.ms / 1000).toFixed(1)} s (picture ${frame.width}×${frame.height}).` + (unsure.length ? ` ${unsure.length} square(s) unsure (red).` : '') +
+      (crops[cropKey] ? '' : ' Tip: click the board’s 4 corners on the picture for a much better read.'), unsure.length || !crops[cropKey] ? 'warn' : '');
     // enterEdit first keeps the previous position/label in its backup, so Cancel goes fully back
-    if (why) { enterEdit(r.placement, 'w', 'Scan needs a fix: ' + why); cg.set({ orientation }); label = nextLabel; return; }
+    if (why) { enterEdit(r.placement, 'w', 'Scan needs a fix: ' + why + ' Or press Cancel, double-click the picture and click the 4 corners again.'); cg.set({ orientation }); label = nextLabel; return; }
     if (mode === 'edit') { mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing'); setPick(null); pendingDoc = null; }
     label = nextLabel;
     setRoot(fen); show(); markUnsure(); scanBar();
@@ -575,45 +649,72 @@ async function laptop() {
     const x = h('button', '', '✕'); x.onclick = () => { b.hidden = true; };
     b.append(t, ed, x);
   }
-  async function useImage(img, key, name) { frame = await createImageBitmap(img); cropKey = key; nextLabel = name; return scan(); }
+  async function useImage(img, key, name) { frame = await createImageBitmap(img); cropKey = key; nextLabel = name; clicks = [];
+    // a camera seen for the first time: ask for the corners first (a room camera shows 4 boards; guessing gives junk and
+    // the editor would then hide the picture)
+    if (key !== 'paste' && !crops[key]) { drawPhoto(); return status(`${name}: click the 4 corners of the board you want, on the picture below.`, 'warn'); }
+    return scan(); }
 
-  // camera frames: from OBS on the stream laptop, otherwise straight from the room phone over VDO.Ninja
+  // camera frames: straight from the room phone over VDO.Ninja (on every machine)
   const camConn = [];
-  async function vdoFrame(i) {
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+  let camIdx = null;                                  // the camera the picture came from (null = a pasted photo)
+  async function vdoFrame(i, quick = false) {
     if (!PH) throw new Error('open the board with the link from the stream laptop first');
     let c = camConn[i];
     if (!c) {
       const vdo = new VDONinjaSDK({ salt: 'vdo.ninja' }), video = document.createElement('video');
       video.muted = true; video.playsInline = true;
-      c = camConn[i] = { vdo, video, timer: 0 };
+      c = camConn[i] = { vdo, video, timer: 0, sharp: false };
       c.ready = new Promise((res, rej) => {
         vdo.addEventListener('track', e => { if (e.detail.track.kind !== 'video') return; video.srcObject = new MediaStream([e.detail.track]); video.play().catch(() => {}); res(); });
         setTimeout(() => rej(new Error('that camera is not live')), 15000);
       });
       c.ready.catch(() => {});
+      // ask the phone for its full picture and a high bitrate, the same control messages the official viewer sends with
+      // &scale=100&bitrate= (raw on the data channel: the SDK's sendData wraps everything as chat, which the phone ignores)
+      vdo.addEventListener('dataChannelOpen', () => { for (const [, cn] of vdo.connections || []) { const dc = cn.viewer && cn.viewer.dataChannel;
+        if (dc && dc.readyState === 'open') try { dc.send(JSON.stringify({ scale: 100 })); dc.send(JSON.stringify({ bitrate: 5000 })); } catch {} } });
       try { await vdo.connect(); await vdo.view(PH + 'c' + (i + 1), { audio: false, video: true }); }
       catch (e) { camConn[i] = null; try { vdo.disconnect(); } catch {} throw e; }
     }
-    clearTimeout(c.timer); c.timer = setTimeout(() => { try { c.vdo.disconnect(); } catch {} camConn[i] = null; }, 120000);   // keep it 2 min for re-scans
+    clearTimeout(c.timer); c.timer = setTimeout(() => { try { c.vdo.disconnect(); } catch {} camConn[i] = null; }, 300000);   // kept 5 min: re-scans are instant and already sharp
     try { await c.ready; } catch (e) { try { c.vdo.disconnect(); } catch {} camConn[i] = null; throw e; }
-    for (let t = 0; t < 60 && (c.video.readyState < 2 || !c.video.videoWidth); t++) await new Promise(r => setTimeout(r, 100));
-    if (!c.video.videoWidth) throw new Error('no picture from that camera yet');
-    return createImageBitmap(c.video);
+    const v = c.video;
+    for (let t = 0; t < 60 && (v.readyState < 2 || !v.videoWidth); t++) await pause(100);
+    if (!v.videoWidth) throw new Error('no picture from that camera yet');
+    if (!c.sharp && !quick) {                          // wait until the picture stops growing (or is full HD), at most 12 s
+      const t0 = Date.now(); let last = 0, since = t0;
+      while (Date.now() - t0 < 12000) {
+        const px = v.videoWidth * v.videoHeight;
+        if (px >= 1920 * 1080) break;
+        if (px !== last) { last = px; since = Date.now(); status(`Getting a sharp picture… ${v.videoWidth}×${v.videoHeight}`); }
+        else if (Date.now() - since > 3000 && Date.now() - t0 > 5000) break;
+        await pause(150);
+      }
+      c.sharp = true;
+    }
+    const grab = () => { const cv = new OffscreenCanvas(v.videoWidth, v.videoHeight), g = cv.getContext('2d', { willReadFrequently: true }); g.drawImage(v, 0, 0); return g.getImageData(0, 0, cv.width, cv.height); };
+    const f = [grab()];
+    for (let k = 0; k < 2; k++) { await pause(130); const n = grab(); if (n.width === f[0].width && n.height === f[0].height) f.push(n); }
+    if (f.length === 3) { const [A, B, C] = f.map(x => x.data);   // per-pixel median of 3 frames, written into the first
+      for (let p = 0; p < A.length; p++) { const a = A[p], b = B[p], cc = C[p]; A[p] = a > b ? (b > cc ? b : a > cc ? cc : a) : (a > cc ? a : b > cc ? cc : b); } }
+    return createImageBitmap(f[0]);
   }
-  async function grabCam(i) {
-    if (LOCAL) { try { const res = await fetch('/shot?source=' + encodeURIComponent(CAMS[i][0])); if (res.ok) return await res.blob(); } catch {} }
-    return vdoFrame(i);
-  }
+  const grabCam = (i, quick) => vdoFrame(i, quick);
+  // connect to a room phone ahead of time (the first connection takes 5-15 s); kept 5 min like a grab
+  function warm(i) { if (i >= 0 && i < 4 && PH && !camConn[i]) vdoFrame(i, true).catch(() => {}); }
   CAMS.forEach(([source, name], i) => {
     const b = h('button', '', name);
     b.onclick = async () => { status(`Grabbing ${name}…`); setCam(i + 1);   // the stream's room follows the scanned board
-      try { await useImage(await grabCam(i), source, name); }
+      try { const f = await grabCam(i, !crops[source]); camIdx = i; await useImage(f, source, name); }   // no corners yet: show the first frame at once, sharpen while they click
       catch (e) { status(`Could not grab ${name}: ${e.message}`, 'err'); } };
+    b.addEventListener('mouseenter', () => warm(i));
     $('cams').append(b);
   });
-  addEventListener('paste', e => { const f = [...e.clipboardData.items].find(i => i.type.startsWith('image/')); if (f) useImage(f.getAsFile(), 'paste', 'Screenshot'); });
+  addEventListener('paste', e => { const f = [...e.clipboardData.items].find(i => i.type.startsWith('image/')); if (f) camIdx = null, useImage(f.getAsFile(), 'paste', 'Screenshot'); });
   addEventListener('dragover', e => e.preventDefault());
-  addEventListener('drop', e => { e.preventDefault(); const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/')); if (f) useImage(f, 'paste', 'Screenshot'); });
+  addEventListener('drop', e => { e.preventDefault(); const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/')); if (f) { camIdx = null; useImage(f, 'paste', 'Screenshot'); } });
 
   // ---------- start: the board saved on this laptop, then whatever newer the room has ----------
   let saved = null; try { saved = JSON.parse(localStorage.getItem('boardDoc2') || 'null'); } catch {}

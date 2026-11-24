@@ -38,7 +38,7 @@ self.onmessage = async ({ data: { id, image } }) => {
       for (let c = 0; c < 3; c++) input[c * PLANE + p] = (px[i + c] / 255 - MEAN[c]) / STD[c];
     const tensor = new ort.Tensor('float32', input, [1, 3, RES, RES]);
     const out = await session.run({ image: tensor });
-    const logits = out.logits.data, [cos] = out.direction.data;
+    const logits = out.logits.data, dir = [...out.direction.data], [cos] = dir;
     // per square: best class and how sure the model is (softmax probability of that class)
     const board = [], sure = [];
     for (let s = 0; s < 64; s++) {
@@ -51,6 +51,7 @@ self.onmessage = async ({ data: { id, image } }) => {
     const placement = [0, 1, 2, 3, 4, 5, 6, 7].map(r => board.slice(r * 8, r * 8 + 8).join('').replace(/\.+/g, m => m.length)).join('/');
     // squares in FEN order a8..h1 -> names
     const unsure = sure.flatMap((p, s) => p < 0.7 ? ['abcdefgh'[s % 8] + (8 - (s >> 3))] : []);
-    self.postMessage({ id, placement, orientation: cos < WHITE_VIEW_COS ? 'black' : 'white', unsure, backend, ms: Math.round(performance.now() - t0) });
+    // board/sure/dir: the page can merge two reads (plain + contrast-boosted) square by square
+    self.postMessage({ id, board: board.join(''), sure, dir, placement, orientation: cos < WHITE_VIEW_COS ? 'black' : 'white', unsure, backend, ms: Math.round(performance.now() - t0) });
   } catch (e) { self.postMessage({ id, error: e.message || String(e) }); }
 };
