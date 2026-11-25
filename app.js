@@ -464,7 +464,7 @@ async function laptop() {
       ackTimer = setTimeout(() => { if (!obsAck) { obsAck = { onBreak: !!stage.onBreak, ok: false }; renderStage(); } }, 5000);
     }
   }
-  const setCam = n => { stage.cam = n; renderStage(); commit('sCam'); warm(n - 1); };   // a room put on stream is the one likely to be scanned next
+  const setCam = n => { stage.cam = n; renderStage(); commit('sCam'); };   // (no pre-connect here any more: every extra viewer is another full upload from the phone; 2026-11-25 the guest Wi-Fi choked)
   document.querySelectorAll('#mainSeg button').forEach(b => b.onclick = () => setMain(b.dataset.main));
   document.querySelectorAll('#camSeg button[data-cam]').forEach(b => b.onclick = () => setCam(+b.dataset.cam));
   addEventListener('keydown', e => {
@@ -691,11 +691,11 @@ async function laptop() {
       // ask the phone for its full picture and a high bitrate, the same control messages the official viewer sends with
       // &scale=100&bitrate= (raw on the data channel: the SDK's sendData wraps everything as chat, which the phone ignores)
       vdo.addEventListener('dataChannelOpen', () => { for (const [, cn] of vdo.connections || []) { const dc = cn.viewer && cn.viewer.dataChannel;
-        if (dc && dc.readyState === 'open') try { dc.send(JSON.stringify({ scale: 100 })); dc.send(JSON.stringify({ bitrate: 8000 })); } catch {} } });
+        if (dc && dc.readyState === 'open') try { dc.send(JSON.stringify({ scale: 100 })); dc.send(JSON.stringify({ bitrate: 3000 })); } catch {} } });
       try { await vdo.connect(); await vdo.view(PH + 'c' + (i + 1), { audio: false, video: true }); }
       catch (e) { camConn[i] = null; try { vdo.disconnect(); } catch {} throw e; }
     }
-    clearTimeout(c.timer); c.timer = setTimeout(() => { try { c.vdo.disconnect(); } catch {} camConn[i] = null; }, 300000);   // kept 5 min: re-scans are instant and already sharp
+    clearTimeout(c.timer); c.timer = setTimeout(() => { try { c.vdo.disconnect(); } catch {} camConn[i] = null; }, 60000);   // kept 1 min: re-scans are instant and already sharp
     try { await c.ready; } catch (e) { try { c.vdo.disconnect(); } catch {} camConn[i] = null; throw e; }
     const v = c.video;
     for (let t = 0; t < 60 && (v.readyState < 2 || !v.videoWidth); t++) await pause(100);
