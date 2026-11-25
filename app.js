@@ -649,14 +649,26 @@ async function laptop() {
     }
     window.__lastScan = r;
     orientation = r.orientation; unsure = r.unsure;
-    const fen = fenAuto(r.placement), why = legal(fen);
+    const fen = fenAuto(r.placement), why = legal(fen) || implausible(r.placement, unsure);
     status(`Read in ${(r.ms / 1000).toFixed(1)} s (picture ${frame.width}×${frame.height}).` + (unsure.length ? ` ${unsure.length} square(s) unsure (red).` : '') +
       (crops[cropKey] ? '' : ' Tip: click the board’s 4 corners on the picture for a much better read.'), unsure.length || !crops[cropKey] ? 'warn' : '');
     // enterEdit first keeps the previous position/label in its backup, so Cancel goes fully back
-    if (why) { enterEdit(r.placement, 'w', 'Scan needs a fix: ' + why + ' Or press Cancel, double-click the picture and click the 4 corners again.'); cg.set({ orientation }); label = nextLabel; return; }
+    if (why) { enterEdit(r.placement, 'w', 'Scan not trusted, NOT on the stream: ' + why + ' Fix the red squares and press Done, or Cancel. (Side-on cameras and metal pieces read badly: the reader needs a camera looking down on the board.)'); cg.set({ orientation }); label = nextLabel; return; }
     if (mode === 'edit') { mode = 'analysis'; $('scanBox').hidden = false; $('editBox').hidden = true; $('app').classList.remove('editing'); setPick(null); pendingDoc = null; }
     label = nextLabel;
     setRoot(fen); show(); markUnsure(); scanBar();
+  }
+  // a read only goes straight on the stream if it looks like a real game (2026-11-25: side-on photos of metal pieces read
+  // as "legal" nonsense, e.g. four white queens, and went on air). Otherwise it opens in the editor for a human to check.
+  function implausible(placement, unsureSq) {
+    const n = ch => (placement.match(new RegExp(ch, 'g')) || []).length;
+    if (n('K') !== 1 || n('k') !== 1) return 'not exactly one king each.';
+    if (n('P') > 8 || n('p') > 8) return 'more than 8 pawns for one side.';
+    const extra = c => Math.max(0, n(c === 'w' ? 'Q' : 'q') - 1) + Math.max(0, n(c === 'w' ? 'R' : 'r') - 2) + Math.max(0, n(c === 'w' ? 'B' : 'b') - 2) + Math.max(0, n(c === 'w' ? 'N' : 'n') - 2);
+    if (extra('w') > 8 - n('P') || extra('b') > 8 - n('p') || extra('w') + extra('b') > 1) return 'impossible pieces (e.g. several queens).';
+    if (n('[PNBRQK]') > 16 || n('[pnbrqk]') > 16) return 'more than 16 pieces for one side.';
+    if (unsureSq.length > 2) return `${unsureSq.length} squares unsure.`;
+    return null;
   }
   // after a scan: a short note (who is to move doesn't matter: either side can move)
   function scanBar() {
